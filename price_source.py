@@ -126,15 +126,85 @@ def _try_toss(ticker, not_after=None):
     return None
 
 
+# ── 네이버 fchart 경량 조회(2026-08-29 대역폭) ──
+# FinanceDataReader.DataReader(6자리코드) 는 내부적으로 NaverDailyReader →
+#   fchart.stock.naver.com/sise.nhn?count=6000 을 부른다. 호출부는 15~45일치만 쓰는데
+#   회당 «전 기간(~6000봉) ≈180KB» 를 받는다([실측] 31행 요청에 196,707B).
+#   같은 URL·같은 파싱을 count=lookback+5 로만 부르면 ~2KB 다. 소스·값은 동일하다.
+#   실패(네트워크·형식 변화)하면 종전 FDR 경로로 «그대로» 폴백한다(조용한 축소 없음).
+_NAVER_FCHART = "https://fchart.stock.naver.com/sise.nhn"
+NAVER_LIGHT_STATS = {"light_ok": 0, "light_fail": 0, "fdr_full": 0}
+
+
+def naver_daily_rows(ticker, lookback_days, timeout=10):
+    """일봉 [(YYYY-MM-DD, close:float), ...] 오름차순. count=lookback_days+5 만 요청.
+    행이 없으면 빈 리스트, 네트워크/HTTP 오류는 예외(호출부가 FDR 로 폴백)."""
+    import re
+    import requests
+    count = max(5, int(lookback_days) + 5)
+    r = requests.get(_NAVER_FCHART,
+                     params={"timeframe": "day", "count": count,
+                             "requestType": 0, "symbol": ticker},
+                     timeout=timeout)
+    r.raise_for_status()
+    rows = []
+    for m in re.finditer(r'<item data="([^"]+)"', r.text):
+        parts = m.group(1).split("|")
+        if len(parts) < 5:
+            continue
+        d = parts[0].strip()
+        try:
+            close = float(parts[4])
+        except ValueError:
+            continue
+        if len(d) == 8 and d.isdigit():
+            rows.append(("%s-%s-%s" % (d[:4], d[4:6], d[6:]), close))
+    rows.sort(key=lambda x: x[0])
+    return rows
+
+
+def _naver_light_window(ticker, lookback_days):
+    """[start, today] 창의 (date, close) 행. 실패/0건이면 None(→ FDR 폴백)."""
+    try:
+        end = _dt.date.today()
+        start = (end - _dt.timedelta(days=lookback_days)).isoformat()
+        rows = [r for r in naver_daily_rows(ticker, lookback_days)
+                if start <= r[0] <= end.isoformat()]
+    except Exception as e:  # noqa: BLE001
+        NAVER_LIGHT_STATS["light_fail"] += 1
+        logger.warning("[price_source] naver 경량조회 실패 %s: %r → FDR 폴백", ticker, e)
+        return None
+    if not rows:
+        NAVER_LIGHT_STATS["light_fail"] += 1
+        return None
+    NAVER_LIGHT_STATS["light_ok"] += 1
+    return rows
+
+
 def _try_fdr(ticker, lookback_days=15, not_after=None):
     """3순위. FinanceDataReader 최근 종가 (pykrx·toss 모두 실패 시 폴백, KIS-독립).
-       성공 시 (price:float, asof:'YYYY-MM-DD'), 실패 시 None."""
+       성공 시 (price:float, asof:'YYYY-MM-DD'), 실패 시 None.
+       [2026-08-29] 먼저 같은 소스(네이버 fchart)를 경량으로 받고, 실패 시에만 FDR 전체조회."""
+    rows = _naver_light_window(ticker, lookback_days)
+    if rows is not None:
+        if not_after:
+            rows = [r for r in rows if r[0] <= str(not_after)]
+        if not rows:
+            logger.info("[price_source] fdr %s: %s 이전 확정행 없음 → 다음 순위 폴백",
+                        ticker, not_after)
+            return None
+        asof, close = rows[-1]
+        if close <= 0:
+            logger.info("[price_source] fdr 종가<=0 %s → 다음 순위 폴백", ticker)
+            return None
+        return float(close), asof
     try:
         import FinanceDataReader as fdr
     except Exception as e:
         logger.warning("[price_source] FinanceDataReader import 실패: %r → 다음 순위 폴백", e)
         return None
     try:
+        NAVER_LIGHT_STATS["fdr_full"] += 1
         end = _dt.date.today()
         start = end - _dt.timedelta(days=lookback_days)
         df = fdr.DataReader(ticker, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
@@ -253,7 +323,21 @@ def _series_pykrx(ticker, lookback_days, not_after):
 
 
 def _series_fdr(ticker, lookback_days, not_after):
+    # [2026-08-29] 경량 조회 우선(같은 소스, count 제한). 실패 시 FDR 전체조회로 폴백.
+    rows = _naver_light_window(ticker, lookback_days)
+    if rows is not None:
+        out = []
+        for ds, v in rows:
+            if not_after and ds > str(not_after):
+                continue
+            iv = int(round(float(v)))
+            if iv > 0 and len(ds) == 10:
+                out.append([ds, iv])
+        out.sort(key=lambda r: r[0])
+        if out:
+            return out
     import FinanceDataReader as fdr
+    NAVER_LIGHT_STATS["fdr_full"] += 1
     end = _dt.date.today()
     start = end - _dt.timedelta(days=lookback_days)
     df = fdr.DataReader(ticker, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))

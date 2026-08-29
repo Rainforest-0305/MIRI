@@ -25,7 +25,20 @@ def _fetch_last_close(stock_code: str):
                 return int(close), "pykrx"
     except Exception:
         pass
-    # 2순위 FinanceDataReader
+    # 2순위-a (2026-08-29 대역폭): FDR 과 같은 소스(네이버 fchart)를 «필요한 봉 수만»
+    # 받는 경량 경로. FDR DataReader 는 회당 ~180KB(전기간 6000봉)를 받았다. 값은 동일.
+    # 실패하면 아래 2순위-b(FDR 전체조회)로 그대로 폴백한다.
+    try:
+        import price_source as _ps   # repo 루트(app.py 와 같은 sys.path)
+        start = (date.today() - timedelta(days=14)).strftime("%Y-%m-%d")
+        rows = [r for r in _ps.naver_daily_rows(stock_code, 14) if r[0] >= start]
+        if rows:
+            close = rows[-1][1]
+            if close and close > 0:
+                return int(close), "fdr"
+    except Exception:
+        pass
+    # 2순위-b FinanceDataReader
     try:
         import FinanceDataReader as _fdr
         start = (date.today() - timedelta(days=14)).strftime("%Y-%m-%d")

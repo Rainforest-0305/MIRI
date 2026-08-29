@@ -206,6 +206,123 @@ def fetch_markets(days=3, markets=("Y", "K"), page_count=100, max_pages=5,
     return merged_items, errors
 
 
+# ---------- 시장 전체 공시검색: 증분 폴링(대역폭 절감, 2026-08-29) ----------
+# 배경(실측): 피드 리프레셔가 10분마다 fetch_markets(7일창, 시장당 5페이지×100건)를
+#   돌려 매 사이클 list.json 10콜 ≈ 250KB 를 «전량 다시» 받았다(월 ≈1.0GB, Render
+#   아웃바운드 한도 5GB 의 20%). 그 1000건 중 사이클 사이에 새로 생기는 건 «오늘자»
+#   신규 접수뿐이다(rcept_dt 는 접수일이라 신규 rcept_no 는 항상 end_de 날짜다).
+# 설계:
+#   - 프로세스 메모리에 시장별 전건 목록(_MKT_STORE)을 둔다.
+#   - 전량 동기화(full): 스토어가 비었거나·조회창(bgn/end/시장/페이지)이 바뀌었거나
+#     (=날짜 넘어감)·마지막 full 로부터 _FULL_SYNC_SEC 지났으면 종전과 «완전히 같은»
+#     페이지네이션으로 받아 스토어를 교체한다(정정표기 rm 등 기존 행 갱신도 여기서 잡힘).
+#   - 증분(incremental): 그 사이엔 bgn_de=end_de=end(오늘)만 조회해 신규 rcept_no 를
+#     스토어에 얹고, 같은 rcept_no 는 최신 행으로 덮는다. 야간·주말은 013(0건)이라 회당
+#     수십 바이트다.
+#   - 어떤 오류든(증분 실패·스토어 비정상) 종전 경로(full)로 «그대로» 폴백한다.
+#     증분이 공시 누락으로 이어지는 경로는 없다: 신규건은 오늘자뿐이고 오늘자는 매
+#     사이클 전부 다시 받는다.
+#   - 상한: 시장당 page_count×max_pages 건(종전 전량 조회와 같은 상한). 초과분은
+#     (rcept_dt, rcept_no) 오래된 순으로 잘라낸다 — 종전에도 DART 페이지 상한으로 같은
+#     날짜의 꼬리가 잘렸으므로 표시 결과의 «창»은 같다.
+#   GONGSI_FEED_INCREMENTAL=0 이면 항상 종전 fetch_markets 와 동일하게 동작한다.
+_INCR_ENABLED = (str(__import__("os").getenv("GONGSI_FEED_INCREMENTAL", "1")).strip().lower()
+                 not in ("0", "false", "no", ""))
+_FULL_SYNC_SEC = float(__import__("os").getenv("GONGSI_FEED_FULL_SYNC_SEC", "3600"))
+_MKT_STORE = {"key": None, "per_market": {}, "full_ts": 0.0}
+# 관측 카운터(계측·양성대조용): full/incremental 사이클 수, 마지막 사이클 모드
+STATS = {"full": 0, "incremental": 0, "fallback_full": 0, "last_mode": None}
+
+
+def _window(days, bgn_de, end_de):
+    if bgn_de is None:
+        bgn_de = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+    if end_de is None:
+        end_de = datetime.now().strftime("%Y%m%d")
+    return bgn_de, end_de
+
+
+def _merge_sorted(per_market):
+    merged = {}
+    for cls in per_market:
+        for it in per_market[cls]:
+            rno = (it.get("rcept_no") or "").strip()
+            if rno:
+                merged.setdefault(rno, it)
+    items = list(merged.values())
+    items.sort(key=lambda x: (x.get("rcept_dt", ""), x.get("rcept_no", "")), reverse=True)
+    return items
+
+
+def reset_store():
+    """스토어 초기화(테스트·양성대조용). 다음 호출은 full 로 간다."""
+    _MKT_STORE["key"] = None
+    _MKT_STORE["per_market"] = {}
+    _MKT_STORE["full_ts"] = 0.0
+
+
+def fetch_markets_smart(days=3, markets=("Y", "K"), page_count=100, max_pages=5,
+                        bgn_de=None, end_de=None):
+    """fetch_markets 와 같은 (items, errors) 계약. 가능하면 증분 조회로 바이트를 아낀다.
+
+    반환 items 는 «항상» 스토어의 사본(정렬·중복제거 완료)이다. 호출부가 항목 dict 를
+    변형해도(setdefault 등) 다음 사이클에 영향이 없도록 얕은 복사한다.
+    """
+    bgn, end = _window(days, bgn_de, end_de)
+    key = (bgn, end, tuple(markets), int(page_count), int(max_pages))
+    cap = int(page_count) * int(max_pages)
+    st = _MKT_STORE
+    now = time.time()
+    need_full = ((not _INCR_ENABLED) or st["key"] != key or not st["per_market"]
+                 or (now - st["full_ts"]) >= _FULL_SYNC_SEC)
+    errors = []
+    if not need_full:
+        # ---- 증분: 오늘자(end)만 ----
+        per_market = {cls: list(v) for cls, v in st["per_market"].items()}
+        ok = True
+        for cls in markets:
+            items, err = _fetch_paged(cls, days, page_count, max_pages, end, end)
+            if err:
+                ok = False
+                errors.append(f"{market_label(cls)}:{err}")
+                break
+            existing = {(it.get("rcept_no") or "").strip(): it for it in per_market.get(cls, [])}
+            for it in items:
+                rno = (it.get("rcept_no") or "").strip()
+                if rno:
+                    existing[rno] = it          # 신규 추가 + 기존행 최신값으로 갱신
+            lst = list(existing.values())
+            lst.sort(key=lambda x: (x.get("rcept_dt", ""), x.get("rcept_no", "")), reverse=True)
+            per_market[cls] = lst[:cap]
+        if ok:
+            st["per_market"] = per_market
+            STATS["incremental"] += 1
+            STATS["last_mode"] = "incremental"
+            return [dict(it) for it in _merge_sorted(per_market)], errors
+        # 증분 실패 → 종전 경로(full)로 폴백. 부분 오류는 full 결과의 오류로 대체된다.
+        STATS["fallback_full"] += 1
+        errors = []
+
+    # ---- 전량(종전 fetch_markets 와 동일한 호출) ----
+    per_market = {}
+    for cls in markets:
+        items, err = _fetch_paged(cls, days, page_count, max_pages, bgn, end)
+        per_market[cls] = items
+        if err:
+            errors.append(f"{market_label(cls)}:{err}")
+    STATS["full"] += 1
+    STATS["last_mode"] = "full"
+    if errors:
+        # 일부 시장 실패: 종전처럼 «받은 만큼» 반환하되 스토어는 갱신하지 않는다
+        # (실패분이 빈 목록으로 굳어 다음 증분이 그 위에 쌓이는 것을 막는다).
+        # 단 스토어가 아예 비어 있으면(첫 기동 실패) 다음 사이클도 full 로 간다.
+        return [dict(it) for it in _merge_sorted(per_market)], errors
+    st["key"] = key
+    st["per_market"] = per_market
+    st["full_ts"] = now
+    return [dict(it) for it in _merge_sorted(per_market)], errors
+
+
 def dart_url(rcept_no):
     """접수번호 -> 공시 원문 뷰어 URL (사용자에게 원문 링크 제공용)."""
     return f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"

@@ -486,7 +486,9 @@ def _build_feed(force: bool = False) -> dict:
     seen = core.load_seen()
 
     # KOSPI(Y)+KOSDAQ(K) 페이지네이션 병합. errors 는 시장별 실패 사유.
-    raw, fetch_errors = dart_poll.fetch_markets(
+    # 2026-08-29 대역폭: 증분 폴링(오늘자만 재조회 + 1시간마다 전량 동기화). 계약·정렬·
+    # 상한은 fetch_markets 와 동일. 실패 시 내부에서 종전 전량 경로로 폴백한다.
+    raw, fetch_errors = dart_poll.fetch_markets_smart(
         days=_MARKET_DAYS, markets=_MARKETS,
         page_count=_MARKET_PAGE, max_pages=_MARKET_MAXPAGES)
 
@@ -798,12 +800,41 @@ def _device_id(request: Request) -> str:
 
 
 # ---------------- 엔드포인트 ----------------
+# ---------------- /api/health 관심목록 카운트 캐시 (2026-08-29 대역폭 사고 원인 #1) ----------------
+# [실측] Render 헬스체커가 /api/health 를 «5초마다» 친다(로그 720회/시간). 이 핸들러의
+#   watchlist_count 가 core.load_watchlist() → watch_store.load_all_watch_state() 로
+#   Supabase 3개 테이블(groups/stocks/keywords)을 «전건 select=*» 하고 있었다.
+#   회당 수신 ≈10KB(gzip 와이어) × 720/h ≈ 7.3MB/h ≈ 월 5GB — 8월 Service-Initiated
+#   4.62GB 의 본체다(코드·로그·Render 메트릭으로 확인). 값 자체는 운영 관측용 카운트라
+#   10분 지연이 무해하다 → TTL 캐시로 조회를 «10분에 1회»로 줄인다(폴백 경로는 동일:
+#   Supabase 실패 시 JSON union, 예외 시 직전값 유지).
+_HEALTH_WATCH_TTL = float(os.getenv("GONGSI_HEALTH_WATCH_TTL_SEC", "600"))
+_HEALTH_WATCH = {"ts": 0.0, "count": None, "loads": 0, "lock": threading.Lock()}
+
+
+def _watchlist_count_cached():
+    now = time.time()
+    with _HEALTH_WATCH["lock"]:
+        if (_HEALTH_WATCH["count"] is not None
+                and (now - _HEALTH_WATCH["ts"]) < _HEALTH_WATCH_TTL):
+            return _HEALTH_WATCH["count"]
+        try:
+            n = len(core.load_watchlist()[0])
+        except Exception as e:  # noqa: BLE001
+            print(f"[health] watchlist 조회 실패(직전값 유지): {type(e).__name__}")
+            n = _HEALTH_WATCH["count"] if _HEALTH_WATCH["count"] is not None else 0
+        _HEALTH_WATCH["count"] = n
+        _HEALTH_WATCH["ts"] = now
+        _HEALTH_WATCH["loads"] += 1
+        return n
+
+
 @api.get("/api/health")
 def health():
     out = {
         "ok": True,
         "dart_key": bool(config.DART_API_KEY),
-        "watchlist_count": len(core.load_watchlist()[0]),
+        "watchlist_count": _watchlist_count_cached(),
         "seen_count": len(core.load_seen()),
         "benchmark_ready": impact.has_stats(),   # 버그 B: 실스키마도 정확 판정
         "poll_interval_sec": config.POLL_INTERVAL_SEC,
