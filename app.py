@@ -3125,4 +3125,14 @@ async def _static_cache_headers(request: Request, call_next):
     return resp
 
 
+# ---------------- [④캘린더 배당·상장] features/calendar_events (격리 모듈) ----------------
+# GET /api/calendar/events?ym= — 캐시 파일 전용(요청경로 외부 호출 0). 배치 스케줄러는 그 패키지
+# 안(api.start_scheduler)에 있고 GONGSI_CAL_EVENTS_BATCH=0 으로 끈다. 실패해도 앱 전체 무영향.
+try:
+    from features.calendar_events.api import router as _cal_events_router, start_scheduler as _cal_events_start
+    api.include_router(_cal_events_router)
+    _cal_events_start()
+except Exception as _e:  # noqa: BLE001
+    print(f"[calendar-events] 배선 스킵(무시): {type(_e).__name__}: {_e}")
+
 api.mount("/", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")

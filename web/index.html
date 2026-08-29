@@ -1003,8 +1003,9 @@ window.MIRI_AD_CONFIG = {
     <div class="cal-tabs" id="calTabs" role="tablist" aria-label="캘린더 종류">
       <button role="tab" data-cseg="mezz" aria-selected="false">메자닌 전환</button>
       <button role="tab" data-cseg="earn" class="on" aria-selected="true">실적발표</button>
-      <button role="tab" data-cseg="div" aria-selected="false" disabled>배당·상장<span class="soon">준비중</span></button>
+      <button role="tab" data-cseg="div" aria-selected="false">배당·상장</button>
     </div>
+    <div class="cal-types" id="calTypes" hidden></div>
     <div class="cal-nav"><button id="calPrev" aria-label="이전 달">‹</button><b id="calMonth" class="num">–</b><button id="calNext" aria-label="다음 달">›</button></div>
     <div class="cal-grid" id="calGrid"></div>
     <div class="cal-daylabel" id="calDayLabel"></div>
@@ -1376,6 +1377,14 @@ window.MIRI_AD_CONFIG = {
   .cal-bl li .num.up{color:var(--up)} .cal-bl li .num.down{color:var(--down)} .cal-bl li .num.flat{color:var(--t3)}
   .ev-type.earn{background:var(--blue-soft);color:var(--blue)}
   .cal-ev .ev-conf{flex:none;font-size:11px;font-weight:800;color:var(--t3);font-variant-numeric:tabular-nums}
+  /* 배당·상장(div): 유형은 «글자»로 구분(배당/청약/납입/상장/ETF 상장) — 색만으로 구분하지 않는다 */
+  .ev-type.dv{background:var(--warn-soft);color:var(--warn-ink)}
+  .ev-type.ip{background:var(--blue-soft);color:var(--blue-ink)}
+  .ev-type.et{background:var(--slate-soft);color:var(--t2)}
+  .cal-ev .ev-val{flex:none;font-size:13px;font-weight:800;color:var(--t1);font-variant-numeric:tabular-nums;text-align:right}
+  .cal-ev .ev-val small{display:block;font-size:10.5px;font-weight:600;color:var(--t3)}
+  .cal-types{display:flex;flex-wrap:wrap;gap:6px;padding:0 4px 4px}
+  .cal-types span{font-size:11.5px;font-weight:700;color:var(--t2);background:var(--card);box-shadow:0 0 0 1px var(--line) inset;border-radius:999px;padding:5px 10px;font-variant-numeric:tabular-nums}
   #calEvBody .sval small{color:var(--t3);font-weight:600;font-size:11px}
   /* ===== 하단 5탭 네비 ===== */
   .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:45;display:flex;justify-content:center;
@@ -2619,6 +2628,42 @@ let _mezzLoaded=false,_mezzHistPushed=false;
 let CAL_YM=null,CAL_SEL=null,CAL_ITEMS=[],_mezzData=null,_calBound=false,CAL_OUTLOOK=null;
 // 항목10-②: 캘린더 다중 소스(메자닌 전환 / 실적발표). CAL_ITEMS 는 활성 소스를 가리킨다.
 let CAL_SRC='mezz',MEZZ_ITEMS=[],EARN_ITEMS=[],_earnLoaded=false;
+// 배당·상장(div): GET /api/calendar/events — DART 배당·공모주 + 토스 상장예정(캐시 파일 전용, 2026-08-29 개통)
+let DIV_ITEMS=[],_divLoaded=false,_divDisc='';
+function _won(n){return (n!=null)?Number(n).toLocaleString()+'원':'—';}
+function _md(d){if(!d)return '';const p=String(d).split('-');return p.length===3?(Number(p[1])+'.'+Number(p[2])):d;}
+function _isDiv(it){return !!it&&(it.type==='dividend'||it.type==='ipo'||it.type==='etf_listing');}
+function _mkLb(m){return m==='KOSPI'?'코스피':m==='KOSDAQ'?'코스닥':(m||'');}
+function calDivCard(it){
+  const head=`<span class="ev-main"><span class="ev-nm">${esc(it.corp_name||'')}<span class="cd">${esc(it.stock_code||'')}</span></span>`;
+  if(it.type==='dividend'){
+    const d=it.dividend||{};
+    const sub=[it.label,d.kind,_mkLb(it.market)].filter(Boolean).join(' · ');
+    const val=(d.per_share!=null)?`${_won(d.per_share)}${d.yield_pct!=null?`<small>시가배당률 ${d.yield_pct}%</small>`:''}`:'<small>금액 미정</small>';
+    return `<button class="cal-ev" data-calidx="${it._idx}">${head}<span class="ev-sub">${esc(sub)}</span></span>`+
+      `<span class="ev-type dv">배당</span><span class="ev-val">${val}</span></button>`;
+  }
+  if(it.type==='ipo'){
+    const p=it.ipo||{};
+    const parts=['공모주'];if(p.is_spac)parts.push('스팩');if(it.market)parts.push(_mkLb(it.market));
+    if(it.subtype==='subscription'&&p.sub_start)parts.push(`청약 ${_md(p.sub_start)}~${_md(p.sub_end)}`);
+    const val=(p.price!=null)?`${_won(p.price)}<small>${p.price_final?'확정 공모가':'공모가'}</small>`:'<small>공모가 미정</small>';
+    return `<button class="cal-ev" data-calidx="${it._idx}">${head}<span class="ev-sub">${esc(parts.join(' · '))}</span></span>`+
+      `<span class="ev-type ip">${esc(it.label||'공모')}</span><span class="ev-val">${val}</span></button>`;
+  }
+  const sub=['ETF',_mkLb(it.market)].filter(Boolean).join(' · ');
+  return `<button class="cal-ev" data-calidx="${it._idx}">${head}<span class="ev-sub">${esc(sub)}</span></span>`+
+    `<span class="ev-type et">ETF 상장</span></button>`;
+}
+function renderCalTypes(){
+  const el=document.getElementById('calTypes');if(!el)return;
+  if(CAL_SRC!=='div'||!CAL_YM){el.hidden=true;el.innerHTML='';return;}
+  const mi=_monthItems(CAL_YM),c={};
+  mi.forEach(it=>{const k=it.type==='dividend'?'배당':it.type==='etf_listing'?'ETF 상장':(it.label||'공모');c[k]=(c[k]||0)+1;});
+  const order=['배당','청약','납입','상장','ETF 상장'];
+  const html=order.filter(k=>c[k]).map(k=>`<span>${k} ${c[k]}</span>`).join('');
+  el.innerHTML=html;el.hidden=!html;
+}
 const CAL_WD=['일','월','화','수','목','금','토'];
 function _pad2(n){return('0'+n).slice(-2);}
 function _ymdLocal(dt){return dt.getFullYear()+'-'+_pad2(dt.getMonth()+1)+'-'+_pad2(dt.getDate());}
@@ -2626,6 +2671,7 @@ function _itemsOn(ds){return CAL_ITEMS.filter(it=>it.date===ds);}
 function _monthItems(ym){return CAL_ITEMS.filter(it=>(it.date||'').slice(0,7)===ym);}
 function _evTypeCls(t){t=(t||'').toLowerCase();return(t==='cb'||t==='bw'||t==='eb')?t:'eb';}
 function calEvCard(it){
+  if(_isDiv(it))return calDivCard(it);
   if((it.kind||'')==='earn'){   // 항목10-②: 실적발표(정기보고서 예상일) 카드
     const mk=it.market==='KOSPI'?'코스피':it.market==='KOSDAQ'?'코스닥':(it.market||'');
     const conf={high:'높음',medium:'보통',low:'낮음'}[it.confidence]||'';
@@ -2668,7 +2714,7 @@ function renderCal(){
   // 항목31: 표시월이 이번 달이면 "이번 달", 아니면 "N월"
   const now=new Date(),curYM=now.getFullYear()+'-'+_pad2(now.getMonth()+1);
   const lb=document.getElementById('calCountLb');
-  const _suffix=(CAL_SRC==='earn')?' 예상 실적발표':' 예상 공시';   // 항목10-②: 소스별 라벨
+  const _suffix=(CAL_SRC==='earn')?' 예상 실적발표':(CAL_SRC==='div')?' 배당·상장':' 예상 공시';   // 항목10-②: 소스별 라벨
   if(lb)lb.textContent=(CAL_YM===curYM?'이번 달':(m+'월'))+_suffix;
   let cnt=_monthItems(CAL_YM).length;
   if(CAL_OUTLOOK&&CAL_OUTLOOK.month===CAL_YM&&CAL_OUTLOOK.count!=null)cnt=CAL_OUTLOOK.count;
@@ -2695,6 +2741,7 @@ function renderCal(){
     html+=`<button class="${cl.join(' ')}" data-caldayselect="${c.ymd}"><span class="dnum">${c.d}</span>${mk}</button>`;
   });
   const grid=document.getElementById('calGrid');if(grid)grid.innerHTML=html;
+  renderCalTypes();
   renderCalList();
 }
 function calSelect(ds){if(ds.slice(0,7)!==CAL_YM)CAL_YM=ds.slice(0,7);CAL_SEL=ds;renderCal();}
@@ -2717,7 +2764,33 @@ function openCalEv(idx){
   const body=document.getElementById('calEvBody');
   // 항목10-①: 세부정보를 bullet point 목록으로 표기(라벨:값 → 불릿). 유형별(메자닌/실적 등) 공용.
   if(body){
-    if((it.kind||'')==='earn'){
+    if(_isDiv(it)){
+      const nm=`<li><b>종목</b> ${esc(it.corp_name||'')} <small>${esc(it.stock_code||'')}</small> `;
+      if(it.type==='dividend'){
+        const d=it.dividend||{};
+        body.innerHTML=`<ul class="cal-bl">`+nm+`<span class="ev-type dv">배당</span></li>`+
+          `<li><b>배당기준일</b> <span class="num">${esc(d.record_date||'—')}</span></li>`+
+          `<li><b>지급 예정일</b> ${d.pay_date?`<span class="num">${esc(d.pay_date)}</span>`:esc(d.pay_note||'주주총회 후 확정')}</li>`+
+          `<li><b>주당 배당금</b> <span class="num">${d.per_share!=null?_won(d.per_share):'미정'}</span></li>`+
+          (d.yield_pct!=null?`<li><b>시가배당률</b> <span class="num">${d.yield_pct}%</span></li>`:'')+
+          ((d.kind||d.div_type)?`<li><b>구분</b> ${esc([d.kind,d.div_type].filter(Boolean).join(' · '))}</li>`:'')+
+          `</ul><p class="cal-ev-note">배당을 받으려면 기준일 2영업일 전까지 사야 해요. 지급일은 회사 사정으로 바뀔 수 있어요.</p>`;
+      }else if(it.type==='ipo'){
+        const p=it.ipo||{};
+        body.innerHTML=`<ul class="cal-bl">`+nm+`<span class="ev-type ip">${p.is_spac?'스팩':'공모주'}</span></li>`+
+          `<li><b>청약 기간</b> ${p.sub_start?`<span class="num">${esc(p.sub_start)} ~ ${esc(p.sub_end||p.sub_start)}</span>`:'미정'}</li>`+
+          `<li><b>납입일</b> ${p.pay_date?`<span class="num">${esc(p.pay_date)}</span>`:'미정'}</li>`+
+          `<li><b>상장 예정일</b> ${p.list_date?`<span class="num">${esc(p.list_date)}</span>`:'확정되면 표시돼요'}</li>`+
+          `<li><b>${p.price_final?'확정 공모가':'공모가'}</b> <span class="num">${p.price!=null?_won(p.price):'미정'}</span></li>`+
+          `</ul><p class="cal-ev-note">증권신고서 기준 일정이에요. 정정 신고로 바뀔 수 있어요.</p>`;
+      }else{
+        const e=it.etf||{};
+        body.innerHTML=`<ul class="cal-bl">`+nm+`<span class="ev-type et">ETF 상장</span></li>`+
+          `<li><b>상장 예정일</b> <span class="num">${esc(e.list_date||it.date||'—')}</span></li>`+
+          (it.market?`<li><b>시장</b> ${_mkLb(it.market)}</li>`:'')+
+          `</ul><p class="cal-ev-note">토스증권 상장 예정 정보 기준이에요.</p>`;
+      }
+    }else if((it.kind||'')==='earn'){
       const conf={high:'높음',medium:'보통',low:'낮음'}[it.confidence]||'';
       body.innerHTML=
         `<ul class="cal-bl">`+
@@ -2751,7 +2824,7 @@ function bindCal(){
   if(grid)grid.addEventListener('click',e=>{const b=e.target.closest('[data-caldayselect]');if(b)calSelect(b.getAttribute('data-caldayselect'));});
   const list=document.getElementById('calList');
   if(list)list.addEventListener('click',e=>{const b=e.target.closest('[data-calidx]');if(b)openCalEv(Number(b.getAttribute('data-calidx')));});
-  // 항목10-②: 캘린더 유형 탭(메자닌 전환 / 실적발표). 배당·상장은 disabled(준비중).
+  // 항목10-②: 캘린더 유형 탭(메자닌 전환 / 실적발표 / 배당·상장). 배당·상장 = 2026-08-29 개통.
   const tabs=document.getElementById('calTabs');
   if(tabs)tabs.addEventListener('click',e=>{
     const b=e.target.closest('button[data-cseg]');
@@ -2760,6 +2833,7 @@ function bindCal(){
     if(seg===CAL_SRC)return;   // 같은 소스 재탭 무시
     tabs.querySelectorAll('button').forEach(x=>{const on=x===b;x.classList.toggle('on',on);x.setAttribute('aria-selected',String(on));});
     if(seg==='earn')loadEarn();
+    else if(seg==='div')loadDiv();
     else if(seg==='mezz'){
       const disc=document.getElementById('calDisc');
       if(disc&&_mezzData)disc.textContent=(_mezzData.disclaimer||'')+(_mezzData.note?' '+_mezzData.note:'');
@@ -2821,9 +2895,9 @@ async function loadMezz(){
 /* 항목10-②: 활성 캘린더 소스 전환(메자닌↔실적). CAL_ITEMS 포인터 교체 + 기본 선택일 재계산 + 렌더. */
 function _applyCalSource(src){
   CAL_SRC=src;
-  CAL_ITEMS=(src==='earn')?EARN_ITEMS:MEZZ_ITEMS;
+  CAL_ITEMS=(src==='earn')?EARN_ITEMS:(src==='div')?DIV_ITEMS:MEZZ_ITEMS;
   const head=document.getElementById('mezzHoldHead'),hold=document.getElementById('mezzHoldings');
-  if(src==='earn'){ CAL_OUTLOOK=null; if(head)head.hidden=true; if(hold)hold.style.display='none'; }
+  if(src==='earn'||src==='div'){ CAL_OUTLOOK=null; if(head)head.hidden=true; if(hold)hold.style.display='none'; }
   else { if(hold)hold.style.display=''; if(head)head.hidden=!(hold&&hold.innerHTML.trim()); }
   const todayStr=_ymdLocal(new Date());
   if(!CAL_YM)CAL_YM=todayStr.slice(0,7);
@@ -2844,6 +2918,21 @@ async function loadEarn(){
     _earnLoaded=true;
     const disc=document.getElementById('calDisc');if(disc)disc.textContent=(d&&d.disclaimer)||'';
     _applyCalSource('earn');
+  }catch(e){ if(list)list.innerHTML='<div class="mezz-empty">불러오지 못했어요</div>'; }
+}
+/* 배당·상장 소스 지연 로드(GET /api/calendar/events — 캐시 파일 전용, 전달 1일 이후 전량). */
+async function loadDiv(){
+  bindCal();
+  if(_divLoaded){const disc=document.getElementById('calDisc');if(disc)disc.textContent=_divDisc;_applyCalSource('div');return;}
+  const list=document.getElementById('calList');
+  if(list)list.innerHTML='<div class="mezz-empty">불러오는 중</div>';
+  try{
+    const d=await jget(API+'/calendar/events');
+    DIV_ITEMS=((d&&d.items)||[]).map((it,i)=>{it._idx=i;return it;});
+    _divLoaded=true;_divDisc=(d&&d.disclaimer)||'';
+    const disc=document.getElementById('calDisc');if(disc)disc.textContent=_divDisc;
+    _applyCalSource('div');
+    if(typeof track==='function')track('cal_div_open',{n:DIV_ITEMS.length});
   }catch(e){ if(list)list.innerHTML='<div class="mezz-empty">불러오지 못했어요</div>'; }
 }
 function openMezz(){
