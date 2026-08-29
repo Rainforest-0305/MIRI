@@ -8,6 +8,8 @@
     (토스 실패는 DART 결과까지 버리지 않는다: 토스 절은 직전 스냅샷을 유지하고 sources 에 실패 기록)
   · 토스 SCHEDULED 관측 로그 — 하루 1줄(toss_scheduled_log, 최대 90줄). 2주 뒤
     「토스가 ETF 를 SCHEDULED 로 잡는가」를 데이터로 판정하기 위한 것.
+    ★파일은 Render 디스크 휘발로 하루도 못 버틴다 → 같은 관측을 Supabase
+    calendar_etf_observations 에 upsert(etf_obs.py, obs_date 1행/일, fail-open).
 """
 import argparse
 import datetime as dt
@@ -23,7 +25,7 @@ except ImportError:  # pragma: no cover
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)))
     import config
 
-from features.calendar_events import dart_src, toss_src
+from features.calendar_events import dart_src, etf_obs, toss_src
 
 CACHE_FILE = config.DATA / "calendar_events.json"
 VERSION = 1
@@ -211,9 +213,12 @@ def run(days: int = 90, use_toss: bool = True, dry: bool = False, today: dt.date
             log.append({"date": today.isoformat(), "total": len(snap), "etf": n_etf, "stock": n_stk,
                         "symbols": [f"{s.get('symbol')}:{s.get('securityType')}:{s.get('listDate')}" for s in snap][:30]})
             cache["toss_scheduled_log"] = log[-90:]
+            # Supabase 영속 관측(fail-open: 테이블 없음/네트워크 오류여도 배치는 계속, 파일 로그 유지)
+            obs_ok, obs_reason = etf_obs.record(snap, today) if not dry else (False, "dry")
             sources["toss"] = {"ok": True, "scheduled": len(snap), "etf": n_etf, "stock": n_stk,
+                               "obs_db": {"ok": bool(obs_ok), "reason": obs_reason},
                                "checked_at": dt.datetime.now().isoformat(timespec="seconds")}
-            _log(f"toss SCHEDULED total={len(snap)} etf={n_etf} stock={n_stk}")
+            _log(f"toss SCHEDULED total={len(snap)} etf={n_etf} stock={n_stk} obs_db={obs_ok}({obs_reason})")
         except Exception as e:  # noqa: BLE001
             errors.append(f"toss: {type(e).__name__}: {str(e)[:160]}")
             sources["toss"] = {**(sources.get("toss") or {}), "ok": False, "error": errors[-1],
