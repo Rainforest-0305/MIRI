@@ -768,7 +768,7 @@
     listEl.innerHTML=
       '<div class="an-card-t"><span>증권사 리포트</span><span class="cnt">최신순 · '+rows.length+'건</span></div>'+
       rows.map(function(r){ var op=_anOpinion(r.opinion), n=cnt[_anBrokerKey(r.broker)]||1;
-      return '<div class="an-row"><span class="dt">'+esc(String(r.date||'').slice(2))+'</span>'+
+      return '<div class="an-row"><span class="dt">'+esc(String(r.date||'').slice(2,10).replace(/-/g,'.'))+'</span>'+
         '<span class="br">'+esc(r.broker||'')+'</span>'+
         (n>1?('<i class="an-dup">'+n+'건</i>'):'')+
         '<span class="an-op '+op.c+'">'+esc(op.t)+'</span>'+
