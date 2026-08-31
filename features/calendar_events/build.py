@@ -165,6 +165,82 @@ def _alert(text):
         _log(f"경보 모듈 실패(무시): {type(e).__name__} · 내용: {text}")
 
 
+# ---------------------------------------------------------------- 토스 절(브리지 경유)
+# ★2026-08-31 재설계. 종전에는 「토스 직접 호출 실패」를 그대로 errors 에 넣어
+#   매 사이클 텔레그램 경보를 쐈다. 그런데 서버(Render, 싱가포르)는 토스 IP
+#   화이트리스트에 없어 **직접 호출이 구조적으로 항상 실패**한다 — 즉 그 경보는
+#   「사고」가 아니라 「설계된 정상 상태」를 매시간 알리는 스팸이었다(President 인지).
+#   고칠 것은 경보 문구가 아니라 «울리는 조건»이다:
+#     직접 실패 → 조용히 브리지 스냅샷으로 대체(정상 경로)
+#     스냅샷이 STALE_ALERT_HOURS 이상 낡음 → 그때«만» 경보(=수집기가 진짜 죽음)
+def _toss_snapshot_mod():
+    try:
+        import toss_snapshot
+        return toss_snapshot
+    except Exception as e:  # noqa: BLE001
+        _log(f"브리지 모듈 로드 실패(무시): {type(e).__name__}")
+        return None
+
+
+def fetch_scheduled(dry=False):
+    """상장예정 확보. (items|None, info).
+
+    ① 토스 직접 호출 — 허용 IP(노트북·Azure VM)에서만 성공. 성공하면 브리지
+       스냅샷에도 적어 다른 호스트(서버)가 쓰게 한다(fail-open).
+    ② 실패하면 Supabase 브리지 스냅샷 읽기 — 서버의 «정상» 경로다.
+    ③ 둘 다 없으면 (None, info) → 호출부가 직전 캐시를 유지한다(빈 값으로 덮지 않음).
+    info = {source: toss-direct|snapshot|none, age_min, reason}
+    """
+    ts = _toss_snapshot_mod()
+    try:
+        snap = toss_src.scheduled_snapshot()
+        if not dry and ts is not None:
+            ok, why = ts.put(ts.KIND_SCHEDULED, {"items": snap},
+                             meta={"via": "calendar_batch", "total": len(snap)})
+            _log(f"브리지 스냅샷 갱신 {'성공' if ok else '실패(무시): ' + why}")
+        return snap, {"source": "toss-direct", "age_min": 0.0, "reason": "ok"}
+    except Exception as e:  # noqa: BLE001
+        direct_err = f"{type(e).__name__}: {str(e)[:120]}"
+    if ts is None:
+        return None, {"source": "none", "age_min": None,
+                      "reason": "bridge_module_missing", "direct_error": direct_err}
+    items, meta = ts.scheduled()
+    if items is None:
+        return None, {"source": "none", "age_min": meta.get("age_min"),
+                      "reason": meta.get("reason"), "direct_error": direct_err}
+    return items, {"source": "snapshot", "age_min": meta.get("age_min"), "reason": "ok",
+                   "collected_at": meta.get("collected_at"),
+                   "source_host": meta.get("source_host"), "direct_error": direct_err}
+
+
+def _toss_stale_alert(info, prev_src, dry=False):
+    """스냅샷 나이 기준 경보(직접 실패로는 울리지 않는다). 반환: last_stale_alert_at|None.
+
+    같은 상태로 매 사이클 울지 않게 STALE_ALERT_MIN_INTERVAL_H 간격 스로틀."""
+    if info.get("source") == "toss-direct":
+        return None                      # 방금 실측했다 = 신선. 경보 대상 아님
+    ts = _toss_snapshot_mod()
+    limit_min = (ts.STALE_ALERT_HOURS if ts else 12.0) * 60.0
+    gap_h = ts.STALE_ALERT_MIN_INTERVAL_H if ts else 12.0
+    age = info.get("age_min")
+    if age is not None and age <= limit_min:
+        return None                      # 스냅샷이 충분히 신선 → 조용히 대체 운영(정상)
+    last = (prev_src or {}).get("last_stale_alert_at")
+    if last:
+        try:
+            since_h = (dt.datetime.now() - dt.datetime.fromisoformat(last)).total_seconds() / 3600.0
+            if since_h < gap_h:
+                _log(f"스냅샷 낡음(age={age}) — 직전 경보 {since_h:.1f}h 전이라 스킵(스로틀)")
+                return last
+        except ValueError:
+            pass
+    age_s = f"{age / 60:.1f}h" if isinstance(age, (int, float)) else "없음"
+    if not dry:
+        _alert(f"토스 브리지 스냅샷이 낡았습니다(나이 {age_s}, 임계 {limit_min / 60:.0f}h). "
+               f"수집기(toss_bridge.py)가 멈췄는지 확인 필요. 사유={info.get('reason')}")
+    return dt.datetime.now().isoformat(timespec="seconds")
+
+
 def run(days: int = 90, use_toss: bool = True, dry: bool = False, today: dt.date = None) -> dict:
     """1사이클. 반환 요약 dict(ok, counts, calls, errors). 실패 시 캐시는 덮지 않는다."""
     t0 = time.time()
@@ -202,10 +278,17 @@ def run(days: int = 90, use_toss: bool = True, dry: bool = False, today: dt.date
         sources["dart"] = {**(sources.get("dart") or {}), "ok": False, "error": errors[-1],
                            "checked_at": dt.datetime.now().isoformat(timespec="seconds")}
 
-    # 2) 토스 SCHEDULED 스냅샷(+관측 로그 1줄/일)
+    # 2) 토스 SCHEDULED 스냅샷(직접 → 브리지 스냅샷 폴백) + 관측 로그 1줄/일
+    #    ★errors 에 넣지 않는다 — 「직접 호출 실패」는 서버에선 정상 상태이고,
+    #      errors 에 넣으면 아래 «일부 소스 실패» 경보가 매 사이클 울린다(스팸의 원인).
+    #      토스 절의 경보는 _toss_stale_alert 가 «스냅샷 나이» 기준으로만 판단한다.
+    toss_info = None
     if use_toss:
-        try:
-            snap = toss_src.scheduled_snapshot()
+        prev_toss = sources.get("toss") or {}
+        snap, toss_info = fetch_scheduled(dry=dry)
+        last_alert = _toss_stale_alert(toss_info, prev_toss, dry=dry) \
+            or prev_toss.get("last_stale_alert_at")
+        if snap is not None:
             cache["toss_scheduled"] = snap
             n_etf = sum(1 for s in snap if s.get("securityType") == "ETF")
             n_stk = sum(1 for s in snap if s.get("securityType") == "STOCK")
@@ -216,16 +299,31 @@ def run(days: int = 90, use_toss: bool = True, dry: bool = False, today: dt.date
             # Supabase 영속 관측(fail-open: 테이블 없음/네트워크 오류여도 배치는 계속, 파일 로그 유지)
             obs_ok, obs_reason = etf_obs.record(snap, today) if not dry else (False, "dry")
             sources["toss"] = {"ok": True, "scheduled": len(snap), "etf": n_etf, "stock": n_stk,
+                               "source": toss_info["source"], "age_min": toss_info.get("age_min"),
+                               "collected_at": toss_info.get("collected_at"),
+                               "source_host": toss_info.get("source_host"),
                                "obs_db": {"ok": bool(obs_ok), "reason": obs_reason},
+                               "last_stale_alert_at": last_alert,
                                "checked_at": dt.datetime.now().isoformat(timespec="seconds")}
-            _log(f"toss SCHEDULED total={len(snap)} etf={n_etf} stock={n_stk} obs_db={obs_ok}({obs_reason})")
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"toss: {type(e).__name__}: {str(e)[:160]}")
-            sources["toss"] = {**(sources.get("toss") or {}), "ok": False, "error": errors[-1],
+            _log(f"toss SCHEDULED total={len(snap)} etf={n_etf} stock={n_stk} "
+                 f"source={toss_info['source']} age={toss_info.get('age_min')}min obs_db={obs_ok}({obs_reason})")
+        else:
+            # 직접·스냅샷 둘 다 없음 → 직전 cache['toss_scheduled'] 를 그대로 쓴다(빈 값 덮기 금지)
+            sources["toss"] = {**prev_toss, "ok": False, "source": "none",
+                               "reason": toss_info.get("reason"),
+                               "direct_error": toss_info.get("direct_error"),
+                               "age_min": toss_info.get("age_min"),
+                               "last_stale_alert_at": last_alert,
                                "checked_at": dt.datetime.now().isoformat(timespec="seconds")}
+            _log(f"toss 확보 실패(직전 값 유지): {toss_info.get('reason')} / "
+                 f"직접={toss_info.get('direct_error')}")
 
     dart_ok = sources.get("dart", {}).get("ok")
-    summary = {"ok": dart_ok and not errors, "errors": errors,
+    # ok 판정: DART 는 필수. 토스는 «스냅샷으로라도 확보되면» 정상으로 본다
+    # (직접 호출 불가는 서버의 설계된 정상 상태). 둘 다 없을 때만 실패로 센다.
+    toss_ok = (toss_info is None) or (toss_info.get("source") != "none")
+    summary = {"ok": bool(dart_ok) and not errors and toss_ok, "errors": errors,
+               "toss": toss_info,
                "calls": {"dart": dict(dart_src.CALLS), "toss": dict(toss_src.CALLS)},
                "elapsed_s": round(time.time() - t0, 1)}
     if not dart_ok:

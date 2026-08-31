@@ -251,6 +251,8 @@ def apply_price_signal(base_payload, price_lookup=None, top_n=30):
     price_signal=null 로 강등(순위 성립).
     """
     pool = (base_payload or {}).get("pool") or []
+    src_counts = {}          # source 별 해소 건수(toss-direct / snapshot)
+    ages = []                # 해소된 값들의 나이(분). 응답 age_min = 최댓값(가장 보수적)
     rescored = []
     for it in pool:
         base = it.get("base_score") or 0.0
@@ -275,11 +277,17 @@ def apply_price_signal(base_payload, price_lookup=None, top_n=30):
                   "price": sig.get("price"),
                   "prev_close": sig.get("prev_close"),
                   "volume": sig.get("volume"),
-                  "source": sig.get("source") or "toss",
+                  "source": sig.get("source") or "toss-direct",
+                  "age_min": sig.get("age_min"),
                   "as_of": sig.get("as_of")}
         if chg is not None:
             resolved += 1
             reason += f" + 급등락 {chg:+.2f}%"
+            s = (ps or {}).get("source") or "toss-direct"
+            src_counts[s] = src_counts.get(s, 0) + 1
+            a = (ps or {}).get("age_min")
+            if isinstance(a, (int, float)) and not isinstance(a, bool):
+                ages.append(float(a))
         out.append({
             "rank": rank,
             "score": round(float(final), 2),
@@ -301,12 +309,29 @@ def apply_price_signal(base_payload, price_lookup=None, top_n=30):
         "market_scope": "코스피·코스닥",
         "basis": "disclosure_importance+price_move",
         # 급등락 세그 상태: 값이 하나라도 채워졌으면 active, 아니면 warming(수렴 중).
+        # source = 값의 «출처»: toss-direct(서버가 직접 호출) / snapshot(브리지 스냅샷
+        #   경유 — 서버 IP 가 토스에 미허용일 때의 정상 경로) / none(둘 다 없음=degrade).
+        #   ★둘이 섞이면 «더 낡은 쪽»인 snapshot 으로 표기한다. 화면이 신선도를
+        #     과대평가하지 않게 하는 게 목적이다(보수적 표기).
+        # age_min = 해소된 값들 중 «가장 낡은» 나이(분). null 이면 나이 미상.
         "price_signal": {"status": "active" if resolved else "warming",
-                         "resolved": resolved, "requested": len(out), "source": "toss"},
+                         "resolved": resolved, "requested": len(out),
+                         "source": _signal_source(src_counts),
+                         "age_min": (round(max(ages), 1) if ages else None),
+                         "source_counts": src_counts},
         "count": len(out),
         "items": out,
         "disclaimer": "공시중요도·급등락 기반 참고 순위이며 투자권유가 아닙니다.",
     }
+
+
+def _signal_source(src_counts):
+    """출처 요약 라벨. 아무것도 해소 못했으면 'none'. 섞이면 보수적으로 'snapshot'."""
+    if not src_counts:
+        return "none"
+    if "snapshot" in src_counts:
+        return "snapshot"
+    return sorted(src_counts.items(), key=lambda kv: kv[1], reverse=True)[0][0]
 
 
 def base_or_zero(it):
@@ -320,7 +345,8 @@ def empty_ranking_payload():
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "market_scope": "코스피·코스닥",
         "basis": "disclosure_importance+price_move",
-        "price_signal": {"status": "warming", "resolved": 0, "requested": 0, "source": "toss"},
+        "price_signal": {"status": "warming", "resolved": 0, "requested": 0,
+                         "source": "none", "age_min": None, "source_counts": {}},
         "count": 0,
         "items": [],
         "disclaimer": "공시중요도·급등락 기반 참고 순위이며 투자권유가 아닙니다.",

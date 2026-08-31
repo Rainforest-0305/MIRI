@@ -1652,9 +1652,52 @@ def _price_adapter():
     return mod
 
 
+# ---------------- 토스 시세 브리지(스냅샷 폴백) ----------------
+# ★왜 필요한가 (2026-08-31 실측): 토스 Open API 는 «호출 IP 화이트리스트»다.
+#   Render(싱가포르)에서 토큰 발급이 403 `IP address not allowed` 로 막힌다.
+#   즉 이 서버의 _warm_prices 는 «구조적으로» 0건이고, 그래서 랭킹 상위 5개 점수가
+#   전부 11.62 동점이었다(주가 축이 통째로 죽어 공시중요도만 남음).
+#   해법: 허용 IP(Azure VM·노트북)에서 도는 수집기(tools/toss_bridge.py)가 Supabase 에
+#   스냅샷을 적고, 서버는 직접 호출이 실패하면 그걸 읽는다.
+# 폴백 3경로: 직접 캐시 히트(toss-direct) → 스냅샷(snapshot) → 둘 다 없음(None=degrade).
+_TOSS_SNAPSHOT_MOD = None
+_TOSS_SNAPSHOT_OFF = False
+
+
+def _toss_snapshot():
+    """toss_snapshot 모듈 지연 로드. 부재/실패해도 랭킹 무붕괴(None 반환·1회만 시도)."""
+    global _TOSS_SNAPSHOT_MOD, _TOSS_SNAPSHOT_OFF
+    if _TOSS_SNAPSHOT_OFF:
+        return None
+    if _TOSS_SNAPSHOT_MOD is None:
+        try:
+            import toss_snapshot as _ts
+            _TOSS_SNAPSHOT_MOD = _ts
+        except Exception as e:  # noqa: BLE001
+            _TOSS_SNAPSHOT_OFF = True
+            print(f"[price] 스냅샷 모듈 로드 실패(무시, degrade): {type(e).__name__}")
+            return None
+    return _TOSS_SNAPSHOT_MOD
+
+
+def _snapshot_prices():
+    """(by_code|None, meta). toss_snapshot 이 프로세스 내 TTL 캐시를 들고 있으므로
+    한 요청에서 종목 수만큼 불러도 네트워크 호출은 TTL 당 1회다."""
+    ts = _toss_snapshot()
+    if ts is None:
+        return None, {"reason": "module_missing"}
+    try:
+        return ts.prices()
+    except Exception as e:  # noqa: BLE001
+        print(f"[price] 스냅샷 조회 실패(무시, degrade): {type(e).__name__}")
+        return None, {"reason": type(e).__name__}
+
+
 def _price_lookup(code: str):
-    """요청경로 read-only: 신선한 급등락 시그널이 캐시에 있으면 dict, 없으면 None.
-    라이브 TOSS 호출을 절대 하지 않는다(미스는 워머가 백그라운드로 채운다)."""
+    """요청경로 read-only: 급등락 시그널 dict(없으면 None). 라이브 TOSS 호출 절대 금지.
+
+    ①프로세스 캐시(워머가 채움, source=toss-direct) → ②Supabase 스냅샷(source=snapshot).
+    반환에 source 와 age_min 을 실어 화면·운영이 «직접값/대체값/부재»를 구분하게 한다."""
     code = (code or "").strip()
     if not code:
         return None
@@ -1666,26 +1709,70 @@ def _price_lookup(code: str):
                     "price": ent.get("price"),
                     "prev_close": ent.get("prev_close"),
                     "volume": ent.get("volume"),
-                    "source": ent.get("source") or "toss",
+                    "source": ent.get("source") or "toss-direct",
+                    "age_min": round(max(0.0, now - ent.get("ts", now)) / 60.0, 1),
                     "as_of": ent.get("as_of")}
-    return None
+    by_code, meta = _snapshot_prices()
+    if not by_code:
+        return None
+    r = by_code.get(code)
+    if not isinstance(r, dict):
+        return None
+    return {"change_pct": r.get("change_pct"),
+            "price": r.get("price"),
+            "prev_close": r.get("prev_close"),
+            "volume": r.get("volume"),
+            "source": "snapshot",
+            "age_min": meta.get("age_min"),
+            "as_of": meta.get("collected_at")}
+
+
+# 직접호출 차단기(circuit breaker). Render 는 IP 미허용이라 토스 직접호출이 «항상»
+# 실패한다 — 차단기가 없으면 요청마다 워머가 살아나 403 을 무한히 두드린다(무의미한
+# 아웃바운드 + 키가 더 세게 막힐 위험). 실패하면 일정 시간 직접호출을 쉬고 스냅샷으로 산다.
+# 허용 IP(노트북·VM)에서 돌 때는 성공하므로 차단기가 열리지 않는다 = 동작 차이 없음.
+_PRICE_DIRECT_COOLDOWN_SEC = float(os.getenv("GONGSI_PRICE_DIRECT_COOLDOWN_SEC", "900"))
+_PRICE_BREAKER = {"until": 0.0, "fails": 0}
+
+
+def _direct_blocked() -> bool:
+    with _PRICE_LOCK:
+        return time.time() < _PRICE_BREAKER["until"]
+
+
+def _direct_result(ok: bool):
+    with _PRICE_LOCK:
+        if ok:
+            _PRICE_BREAKER.update({"until": 0.0, "fails": 0})
+        else:
+            _PRICE_BREAKER["fails"] += 1
+            _PRICE_BREAKER["until"] = time.time() + _PRICE_DIRECT_COOLDOWN_SEC
 
 
 def _warm_prices(codes):
     """동기 워밍: price_adapter.movers_for 로 candles 조회→캐시 채움(TOSS 라이브콜).
 
     prewarm(백그라운드 데몬)·워커에서만 호출된다(요청경로 금지). 실패 전방위 격리:
-    어떤 예외에도 캐시를 부분 갱신하고 조용히 반환(500 유발 안 함)."""
+    어떤 예외에도 캐시를 부분 갱신하고 조용히 반환(500 유발 안 함).
+    실패 시 차단기를 열어 다음 _PRICE_DIRECT_COOLDOWN_SEC 동안 직접호출을 쉰다."""
     codes = [c for c in ((x or "").strip() for x in (codes or [])) if c]
     if not codes:
+        return 0
+    if _direct_blocked():
         return 0
     try:
         pa = _price_adapter()
         results, _stats = pa.movers_for(codes[:_PRICE_WARM_BATCH])
         print(f"[price] warm resolved={_stats.get('resolved')} "
               f"toss_calls={_stats.get('toss_calls')} degraded={_stats.get('degraded')}")
+        _direct_result(bool(results))
+        if not results:
+            print(f"[price] 직접호출 0건 → {_PRICE_DIRECT_COOLDOWN_SEC / 60:.0f}분 휴지"
+                  f"(스냅샷 폴백으로 운영)")
     except Exception as e:  # noqa: BLE001
-        print(f"[price] warm 실패(무시, null 폴백): {type(e).__name__}")
+        _direct_result(False)
+        print(f"[price] warm 실패(무시, 스냅샷 폴백): {type(e).__name__} · "
+              f"{_PRICE_DIRECT_COOLDOWN_SEC / 60:.0f}분 휴지")
         return 0
     now = time.time()
     asof = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -1697,7 +1784,7 @@ def _warm_prices(codes):
                 "price": r.get("price"),
                 "prev_close": r.get("prev_close"),
                 "volume": r.get("volume"),
-                "source": "toss",
+                "source": "toss-direct",
                 "as_of": asof,
                 "ts": now,
             }
@@ -1737,6 +1824,8 @@ def _price_enqueue(codes):
     """top-N 후보 종목코드를 급등락 워머 큐에 넣고 워커를 깨운다(fire-and-forget).
     이미 신선 캐시가 있는 코드는 건너뛴다(불필요한 TOSS 호출 회피)."""
     global _PRICE_WARM_THREAD
+    if _direct_blocked():
+        return          # 직접호출이 막힌 구간(예: Render IP 미허용) — 스냅샷으로 산다
     now = time.time()
     with _PRICE_LOCK:
         for c in ((x or "").strip() for x in (codes or [])):
