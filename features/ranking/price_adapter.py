@@ -57,11 +57,17 @@ def _read_env_key(path: Path, key: str):
 
 
 def _creds():
-    """(app_key, secret). gongsi-alert/.env ★단일 소스.
-    kis-trading/.env 폴백 제거(U7-3) — 실계좌 레포 참조는 경계 위반이다.
-    [실측 2026-08-16] gongsi-alert/.env 에 TOSS_APP_KEY·TOSS_SECRET «있음» → 기능 영향 0."""
-    ak = _read_env_key(_GONGSI_ENV, "TOSS_APP_KEY")
-    sk = _read_env_key(_GONGSI_ENV, "TOSS_SECRET")
+    """(app_key, secret). 환경변수 → gongsi-alert/.env 파일 순으로 찾는다.
+
+    ★2026-08-31 실사고 수정: 이전에는 «.env 파일만» 읽었다. 로컬에는 파일이 있어
+      정상이었지만 **Render 에는 .env 파일이 없다** — 키가 프로세스 환경변수로
+      주입된다. 그래서 서버에서만 항상 실패했고 캘린더 배치가 매시간
+      "TOSS_APP_KEY/TOSS_SECRET missing" 을 텔레그램으로 뱉었다.
+      [실측] Render 서비스 RIMI 의 env-vars 에 두 키가 «존재»한다 → 키 문제가 아니라
+      «읽는 곳» 문제였다. 8/16 주석의 「기능 영향 0」은 로컬만 본 판단이었다.
+    kis-trading/.env 폴백은 제거 상태 유지(U7-3) — 실계좌 레포 참조는 경계 위반이다."""
+    ak = os.getenv("TOSS_APP_KEY") or _read_env_key(_GONGSI_ENV, "TOSS_APP_KEY")
+    sk = os.getenv("TOSS_SECRET") or _read_env_key(_GONGSI_ENV, "TOSS_SECRET")
     return ak, sk
 
 
