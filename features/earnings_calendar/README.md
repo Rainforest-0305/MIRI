@@ -72,3 +72,87 @@ python -m features.earnings_calendar.demo      # 모듈
 - 이 패키지 **안에서만** 파일을 쓴다(`out/` 포함).
 - 저장소 루트 `dart_poll`/`config`는 **읽기(import)만**. `build_impact_benchmark.py`,
   `dart_ownership.py`는 import조차 하지 않는다(락).
+
+---
+
+## 2026-09-01 개편 — 「재생성 배치가 아예 없었다」 사고 대응
+
+### 무슨 일이 있었나 (실측)
+`data/earnings_calendar.json` 이 `as_of: 20260515` 에서 멈춘 채 **3.5개월** 갔다.
+그 안의 예측 2,593건 중 **2,530건이 2026-08월분**(반기보고서)이라, 8월이 지나며
+`app.py` 의 `if d < today: continue` 로 전량 만료 → API 응답 **13건** → 실적발표 탭 빈 화면.
+배당·상장은 `features/calendar_events/api.py:start_scheduler` 로 매일 도는데
+**실적발표에는 그 대응물이 없었고**, `app.py:_SLOT_SPECS` 에도 슬롯이 없어
+**3.5개월 정지가 아무 경보도 못 냈다.**
+
+### 추가/변경
+| 파일 | 역할 |
+|---|---|
+| `fetch.py` (신규) | DART `list.json` 정기공시(`pblntf_ty=A`) 증분수집 → `bench_cache/dart/` 확장. **라이브 콜은 이 파일에만 있다**(collect 는 0콜 유지). |
+| `build.py` (신규) | 배치 1사이클: fetch → collect → predict → sanity → `data/earnings_calendar.json` 원자적 저장. |
+| `batch.py` (신규) | 스케줄러 데몬(`calendar_events` 선례와 동일 패턴). `app.py` 가 기동 시 호출. |
+| `predict.py` | (1) 12월결산 가정 제거 (2) 법정기한 sanity 필터 (3) 주말 이월. |
+| `collect.py` | `rcept_no` 중복 제거(창 겹침 방어). |
+| `app.py` | `stale` 플래그 · `_SLOT_SPECS["earnings"]`(kind=maxage) · 배치 배선 · `/api/health` 노출. |
+
+### 배치 주기와 근거
+**12시간마다 점검 → 데이터가 3일 이상 낡았으면 재생성.**
+- 월·분기 주기는 «같은 사고를 짧게 재현»한다. 웨이브가 지나가면 전 종목 예측이 다음
+  슬롯으로 갈아타야 하는데, 갈아타기가 늦으면 그 기간 탭이 **다시 빈다**
+  (월 1회 = 최대 30일, 분기 1회 = 최대 90일).
+- 비용이 사실상 0이다 [실측]: 캐시가 있으면 진행 중 분기만 = **31~62콜**,
+  캐시가 비어도(Render) 3년 전량 = 약 **384콜**. OpenDART 일 한도 20,000콜의 0.3~1.9%.
+- 끄기: `GONGSI_EARN_BATCH=0`. 조정: `GONGSI_EARN_PERIOD_SEC`·`GONGSI_EARN_STALE_H`.
+
+### 관측(다음에 멈추면 알게 만드는 것)
+- `app.py:_SLOT_SPECS["earnings"]` — `kind="maxage"`, `max_age_days=10`.
+  데이터 기준일이 10일 넘게 낡으면 `NONRUN` 판정 + 운영자 텔레그램 경보(쿨다운 24h).
+  [검증] 2026-05-15 스냅샷을 되돌려 넣자 즉시 `NONRUN · 109일 낡았다` 판정 + 경보 발화.
+- `GET /api/earnings-calendar` 응답에 `stale` / `as_of_age_days` / `generated_at` 추가.
+  임계 60일(`GONGSI_EARN_STALE_DAYS`). 「낡아서 없는 것」과 「진짜 없는 것」을 구분하기 위한 것.
+- `GET /api/health` — `slot_earnings_*` + `earnings_data_age_h`·`earnings_last_run_at`·
+  `earnings_last_error`·`earnings_runs`.
+- ★기준일은 **파일 mtime 이 아니라 내용**(`generated_at` → `as_of`)으로 잰다.
+  배포로 파일이 새로 복사되면 mtime 만 새것이 되고 데이터는 낡은 채라, mtime 기준이면
+  이번 정지를 또 못 본다.
+
+### 안전장치
+- **바닥값 가드** — 예측이 `GONGSI_EARN_MIN_PREDICTIONS`(500) 미만이면 **저장하지 않는다.**
+  `bench_cache/` 는 `.gitignore` 라 Render 에는 없다. 가드가 없으면 배치가 시드를
+  **빈 파일로 덮어** 사고를 우리가 직접 재현한다.
+  [검증] 빈 캐시로 run → `ok=False`, 시드 md5 무변경.
+- **법정기한 sanity** (`predict.is_sane`) — 예측일이 그 보고서 유형의 법정기한(+여유)을
+  넘으면 폐기. 여유는 실측으로 정했다(predict.py 주석: +15 에서 보존율 99.4~99.9%).
+- **주말 이월** — [실측] 정기보고서 62,065건 중 토·일 접수 **0건**. median lag 를 그냥
+  더하면 예측이 주말에 떨어진다(보정 전 11월 웨이브 2,595건 중 2,005건이 토·일).
+
+### 맨이름 import 금지 (실사고)
+이 패키지 모듈은 **반드시** `from features.earnings_calendar import X` 로 부른다.
+`sys.path` 에 이 폴더를 넣고 `import collect` 하면 `sys.modules["collect"]` 를 **선점**하는데,
+`features/mezzanine_calendar/collect.py` 를 `app.py:_build_mezzanine_payload` 가 **맨이름으로**
+불러온다. → 배치를 `app.py` 에 배선하자마자 `/api/mezzanine` 이 503 으로 죽었다
+(`module 'collect' has no attribute 'collect_all'`).
+회귀 검사에 `/api/mezzanine` 을 반드시 포함할 것.
+
+### 검증 실측 (2026-09-01)
+- 재생성: 예측 **2,651건**(as_of 20260901, DART 콜 31), sanity 폐기 6건.
+- API 응답(미래분): **2,636건** — 9월 19 · 10월 12 · **11월 2,595** · 12월 10.
+- 11월 피크 = **2026-11-16(월) 2,004건** (법정기한 11/14 토 → 익영업일).
+- DART 대조: 라이브 `list.json` 2025-11 정기공시 **2,623건**(KOSPI 836 + KOSDAQ 1,787),
+  캐시 정기보고서 실접수 **2,624건**, 피크 2025-11-14(금) **2,011건**.
+  → 우리 2026-11 예측 2,595건은 **오차 1.1%**, 피크 형상도 일치.
+- 회귀: `/api/calendar/events` 286건(배당 255·IPO 31) · `/api/mezzanine` 200 · `/api/health` 200.
+
+### 회계연도 학습 (12월결산 가정 제거)
+`FM_TO_TYPE`(3=분기·6=반기·9=분기·12=사업) 고정표는 12월결산 전용이었다. 실측 반례:
+
+| 종목 | 결산 | 고정표 결과 | 학습 후 |
+|---|---|---|---|
+| 현대약품(004310) | 11월결산 | 2027-05-15 (1년 밀림) | 2026-10-15 분기보고서 |
+| 풍강(093380) | 8월결산 | 2027-05-15 | 2026-11-13 사업보고서 |
+| SK리츠(395400) | 분기결산(사업보고서 연 4회) | 2026-09-29 반기보고서(존재하지 않음) | 2026-09-09 사업보고서 |
+| ESR켄달스퀘어리츠(365550) | 반기결산(사업보고서 연 2회) | 2027-05-15 | 2026-10-15 반기보고서 |
+
+→ 종목 «자신의» 이력에서 `fm → 보고서종류` 최빈값을 학습하고 다음 슬롯은 +3개월로 잡는다.
+  12월결산이면 학습 결과가 고정표와 완전히 동일해 기존 경로는 바뀌지 않는다.
+  실측 분포: 학습 2,580종목 / 폴백 71종목.

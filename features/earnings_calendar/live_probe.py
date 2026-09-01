@@ -19,11 +19,11 @@ import io
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(os.path.dirname(_HERE))
-for _p in (_HERE, _ROOT):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-import collect  # noqa: E402
+# ★맨이름 import 금지(predict.py 상단 주석의 실사고 참조) — 패키지 경로로만 부른다.
+from features.earnings_calendar import collect  # noqa: E402
 
 WATCHLIST_FILE = os.path.join(_ROOT, "watchlist.json")
 

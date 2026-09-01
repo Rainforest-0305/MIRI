@@ -18,13 +18,13 @@ import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(os.path.dirname(_HERE))
-for _p in (_HERE, _ROOT):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-import collect       # noqa: E402
-import predict       # noqa: E402
-import live_probe    # noqa: E402
+# ★맨이름 import 금지(predict.py 상단 주석의 실사고 참조) — 패키지 경로로만 부른다.
+from features.earnings_calendar import collect       # noqa: E402
+from features.earnings_calendar import predict       # noqa: E402
+from features.earnings_calendar import live_probe    # noqa: E402
 
 OUT_DIR = os.path.join(_HERE, "out")
 
@@ -35,7 +35,7 @@ def run(live=True, live_n=5):
     records, cstats = collect.load_all()
     groups = collect.group_by_corp(records)
     as_of = collect.dataset_as_of(records)
-    preds, skipped = predict.predict_all(groups)
+    preds, skipped, dropped = predict.predict_all(groups)
 
     # 신뢰도 분포
     conf_dist = {}
@@ -76,6 +76,7 @@ def run(live=True, live_n=5):
             "corps": len(groups),
             "predictions_generated": len(preds),
             "predict_skipped": skipped,
+            "predict_dropped_sanity": len(dropped),
             "future_after_asof": len(future),
             "confidence_dist": conf_dist,
             "method_dist": method_dist,

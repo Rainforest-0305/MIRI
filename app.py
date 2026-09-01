@@ -873,6 +873,13 @@ def health():
         out.update(_batch_slot_view())
     except Exception as e:  # noqa: BLE001
         out["batch_slot_error"] = type(e).__name__
+    # 실적발표 재생성 배치의 «자기 보고»(마지막 실행시각·건수·오류). slot_earnings_* 는
+    # 「데이터가 낡았나」를 보고, 이건 「배치가 무슨 일을 겪었나」를 본다 — 둘 다 필요하다.
+    try:
+        from features.earnings_calendar.batch import view as _earn_batch_view
+        out.update(_earn_batch_view())
+    except Exception as e:  # noqa: BLE001
+        out["earnings_batch_error"] = type(e).__name__
     return out
 
 
@@ -2421,11 +2428,27 @@ def _top100_freshness_view():
 # 휴장일 예외 «없음»(의도): 슬롯이 토요일(비거래일)이고 updated_at 이 «실행일»이라
 #   (top100_collect.py:205 / analyst_collect.py:630 date.today()) 휴장과 무관하다.
 #   「정당하게 안 도는 날」이 존재하지 않으므로 예외를 두면 진짜 미실행 경보를 억제한다.
+#
+# ★kind 축 추가(2026-09-01). 기존 2개는 «OS 스케줄러의 주간 슬롯»(kind="weekly")이라
+#   「그 요일 그 시각에 돌았나」로 본다. 그런데 실적발표 배치는 in-app 데몬이라 고정
+#   슬롯이 없다 — 그래서 kind="maxage": 「데이터가 이 나이를 넘었나」로 본다.
+#   ⇢ 이 슬롯이 «없어서» 실적발표 데이터가 2026-05-15 에 멈춘 채 3.5개월을 갔고
+#     아무 경보도 울리지 않았다. 관측되지 않는 배치는 반드시 멈춘다.
 _SLOT_SPECS = {
-    "analyst": {"task": "MIRI_AnalystCollect_Sat", "weekday": 5, "hour": 5, "minute": 30,
+    "analyst": {"kind": "weekly", "task": "MIRI_AnalystCollect_Sat",
+                "weekday": 5, "hour": 5, "minute": 30,
                 "grace_h": 4.0, "label": "애널리스트 컨센서스"},
-    "top100": {"task": "MIRI_Top100Collect_Sat", "weekday": 5, "hour": 5, "minute": 0,
+    "top100": {"kind": "weekly", "task": "MIRI_Top100Collect_Sat",
+               "weekday": 5, "hour": 5, "minute": 0,
                "grace_h": 4.0, "label": "시총 Top100"},
+    # 실적발표 예상 캘린더. 배치는 features/earnings_calendar/batch.py(in-app 데몬):
+    #   12시간마다 점검 → 데이터가 3일 이상 낡았으면 재생성.
+    # max_age_days=10 근거: 정상이면 최대 3일 + 점검주기 0.5일 = 3.5일이면 갱신된다.
+    #   10일 = 그 배치가 «연달아 여러 회 실패»한 상태다. 정상 운영에서는 안 켜지고,
+    #   켜졌다면 확실한 고장이다. (클라 노출용 stale 임계 60일보다 «훨씬 빡빡»한 것이
+    #   의도다 — 사용자가 빈 화면을 보기 «전에» 운영자가 먼저 알아야 한다.)
+    "earnings": {"kind": "maxage", "task": "features/earnings_calendar/batch.py (in-app 데몬)",
+                 "max_age_days": 10.0, "label": "실적발표 예상 캘린더"},
 }
 _SLOT_CHECK_SEC = float(os.getenv("GONGSI_SLOT_CHECK_SEC", "1800"))     # 30분
 _SLOT_ALERT_COOLDOWN = float(os.getenv("GONGSI_SLOT_ALERT_COOLDOWN", "86400"))
@@ -2449,6 +2472,8 @@ def _slot_verdict(job, updated_at, now):
     """(verdict, why, slot). verdict ∈ OK | NONRUN | UNKNOWN.
     ★조회 실패(updated_at=None)를 미실행으로 «단정하지 않는다»."""
     spec = _SLOT_SPECS[job]
+    if spec.get("kind") == "maxage":
+        return _slot_verdict_maxage(spec, updated_at, now)
     slot = _last_slot(spec, now)
     deadline = slot + _td(hours=spec["grace_h"])
     if now < deadline:
@@ -2466,14 +2491,59 @@ def _slot_verdict(job, updated_at, now):
             f"데이터 갱신일은 {upd} — 실행되지 않았다", slot)
 
 
+def _slot_verdict_maxage(spec, updated_at, now):
+    """kind="maxage" 판정 — 고정 슬롯이 없는 in-app 배치용.
+
+    updated_at = 그 데이터의 «기준일»(YYYY-MM-DD). max_age_days 를 넘으면 NONRUN.
+    slot(3번째 반환값)은 「이 날까지는 갱신됐어야 한다」는 마감일로 채운다 —
+    호출측(_slot_check_once/_batch_slot_view)이 그대로 쓰므로 형상은 datetime 유지."""
+    max_age = float(spec.get("max_age_days", 10.0))
+    if not updated_at:
+        # ★모르는 것을 정상으로 취급하지 않는다. 다만 미실행으로 «단정»도 하지 않는다.
+        return "UNKNOWN", "데이터 기준일 미확보 — 판정 보류", now - _td(days=max_age)
+    try:
+        upd = datetime.strptime(str(updated_at)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return "UNKNOWN", f"기준일 파싱 실패({updated_at!r})", now - _td(days=max_age)
+    age = (now.date() - upd).days
+    deadline = datetime.combine(upd + _td(days=max_age), datetime.min.time(), tzinfo=_KST)
+    if age <= max_age:
+        return "OK", f"데이터 기준일 {upd} (나이 {age}일 ≤ 상한 {max_age:.0f}일)", deadline
+    return ("NONRUN",
+            f"데이터 기준일이 {upd} 로 {age}일 낡았다(상한 {max_age:.0f}일) — "
+            "재생성 배치가 돌지 않고 있다", deadline)
+
+
+def _earnings_probe():
+    """실적발표 캘린더 데이터의 기준일 probe. 외부 호출 0(파일 read).
+    반환 {updated_at: 'YYYY-MM-DD'|None, count, source}."""
+    snap = miri_cache.load_json(_EARN_FILE_SEED, default=None)
+    src = "seed"
+    if not (isinstance(snap, dict) and snap.get("predictions")):
+        snap = miri_cache.load_json(_EARN_FILE_DEV, default=None)
+        src = "dev"
+    if not isinstance(snap, dict):
+        return {"updated_at": None, "count": None, "source": None}
+    base = _earn_as_of_date(snap)
+    return {"updated_at": (base.isoformat() if base else None),
+            "count": snap.get("count"), "source": src}
+
+
 def _slot_alert(job, why, slot):
     """미실행 경보. _stale_alert 와 «같은 채널»(notify_alert._tg_send = 운영자 개인).
     실유저 공시채널(TG_CHANNEL_ID)은 이 경로를 쓰지 않으므로 구조적으로 도달 불가."""
     spec = _SLOT_SPECS[job]
+    # ★조치 문구는 배치 «종류»에 맞춰야 한다. in-app 데몬한테 schtasks 를 치라고 하면
+    #   「작업 없음」만 보고 조용히 넘어간다(전멸대응 절차가 실패했던 것과 같은 형태).
+    if spec.get("kind") == "maxage":
+        action = ("조치: /api/health 의 earnings_last_error·earnings_runs 확인 → "
+                  "수동 재생성은 python -m features.earnings_calendar.build")
+    else:
+        action = "조치: schtasks /query /tn <작업> /v 로 LastRunTime·LastTaskResult 확인"
     msg = (f"[MIRI 배치 미실행] {spec['label']}\n"
            f"작업 {spec['task']}\n"
            f"{why}\n"
-           "조치: schtasks /query /tn <작업> /v 로 LastRunTime·LastTaskResult 확인")
+           + action)
     print("[slot][ALERT] " + msg.replace("\n", " | "))
     sent = False
     if _ANALYST_ALERT_TG:
@@ -2498,14 +2568,21 @@ def _slot_check_once():
     out = {}
     for job in _SLOT_SPECS:
         try:
+            # ★job 마다 «명시»로 분기한다. 예전엔 else 가 top100 이라, 슬롯을 새로
+            #   추가하면 엉뚱하게 top100 을 probe 하고도 조용히 OK 를 냈다(조용한 오판).
             if job == "analyst":
                 st = _analyst_probe()
                 for k, v in st.items():
                     _ANALYST_FRESH_STATE[k] = v
-            else:
+            elif job == "top100":
                 st = _top100_probe()
                 for k, v in st.items():
                     _TOP100_FRESH_STATE[k] = v
+            elif job == "earnings":
+                st = _earnings_probe()
+            else:
+                print(f"[slot] {job} probe 미배선 — 스킵(슬롯 추가 시 여기에 분기 추가)")
+                continue
             verdict, why, slot = _slot_verdict(job, st.get("updated_at"), now)
         except Exception as e:  # noqa: BLE001
             print(f"[slot] {job} 점검 예외(무시): {type(e).__name__}: {e}")
@@ -3112,6 +3189,39 @@ _EARN_FILE_SEED = config.DATA / "earnings_calendar.json"
 _EARN_FILE_DEV = Path(__file__).parent / "features" / "earnings_calendar" / "out" / "earnings_calendar.json"
 _EARN_MEM = {"ts": 0.0, "data": None}
 
+# ★stale 임계(일). 2026-09-01 사고의 «뿌리»가 여기였다 — 서버도 클라도
+#   「낡아서 없는 것」과 「진짜 없는 것」을 구분할 방법이 없었다. 3.5개월 정지 동안
+#   API 는 count=13 을 아무 표시 없이 200 으로 내보냈고 화면은 그냥 비었다.
+#   임계 60일 근거: 재생성 배치(features/earnings_calendar/batch.py)는 데이터가 3일
+#   이상 낡으면 12시간 주기로 돈다. 60일 = 그 배치가 «20회 연속 실패»한 상태다.
+#   즉 정상 운영에서는 절대 켜지지 않고, 켜졌다면 확실한 고장이다.
+#   (서버측 경보는 더 빡빡한 축으로 따로 본다 — _SLOT_SPECS["earnings"] grace 참조.)
+_EARN_STALE_DAYS = float(os.getenv("GONGSI_EARN_STALE_DAYS", "60"))
+
+
+def _earn_as_of_date(snap):
+    """스냅샷의 «데이터 기준일» date. generated_at(배치 실행시각) → as_of(YYYYMMDD) 순.
+
+    파일 mtime 은 쓰지 않는다 — 배포로 파일이 새로 복사되면 mtime 만 새것이 되고
+    데이터는 낡은 채라, mtime 기준이면 이번 정지를 또 못 본다.
+    """
+    import datetime as _dt
+    if not isinstance(snap, dict):
+        return None
+    g = snap.get("generated_at")
+    if g:
+        try:
+            return _dt.datetime.fromisoformat(str(g)).date()
+        except ValueError:
+            pass
+    a = str(snap.get("as_of") or "")
+    if len(a) == 8 and a.isdigit():
+        try:
+            return _dt.date(int(a[:4]), int(a[4:6]), int(a[6:8]))
+        except ValueError:
+            pass
+    return None
+
 
 def _build_earnings_calendar():
     import datetime as _dt
@@ -3139,8 +3249,18 @@ def _build_earnings_calendar():
             "kind": "earn",
         })
     items.sort(key=lambda x: (x["date"], x.get("corp_name") or ""))
+    base = _earn_as_of_date(snap)
+    age_days = ((_dt.date.today() - base).days if base else None)
+    # stale=True 는 「이 응답의 빈칸/적은 건수는 데이터가 낡아서일 수 있다」는 뜻이다.
+    # 기준일을 아예 못 읽으면(base=None) 그것도 stale 로 본다 — 모르는 것을 정상으로
+    # 취급하는 게 이번 사고의 패턴이었다.
+    stale = True if age_days is None else (age_days > _EARN_STALE_DAYS)
     return {"count": len(items), "items": items,
             "as_of": (snap.get("as_of") if isinstance(snap, dict) else None),
+            "generated_at": (snap.get("generated_at") if isinstance(snap, dict) else None),
+            "as_of_age_days": age_days,
+            "stale": stale,
+            "stale_threshold_days": _EARN_STALE_DAYS,
             "market_scope": "코스피·코스닥",
             "disclaimer": "과거 정기보고서 접수 계절성으로 추정한 예상 발표일입니다(실제일과 다를 수 있음)."}
 
@@ -3160,7 +3280,11 @@ def get_earnings_calendar(request: Request):
         return _json_cached(request, data)
     except Exception as e:  # noqa: BLE001
         print(f"[earnings-cal] 예외 폴백: {type(e).__name__} {e}")
-        return _json_cached(request, {"count": 0, "items": [], "market_scope": "코스피·코스닥"})
+        # 폴백은 «데이터를 못 읽은» 상태다 → stale=True. 빈 화면을 정상으로 위장하지 않는다.
+        return _json_cached(request, {"count": 0, "items": [], "stale": True,
+                                      "as_of": None, "as_of_age_days": None,
+                                      "stale_threshold_days": _EARN_STALE_DAYS,
+                                      "market_scope": "코스피·코스닥"})
 
 
 # ---------------- 정적 프론트엔드(web/) 마운트 (마지막에) ----------------
@@ -3223,5 +3347,16 @@ try:
     _cal_events_start()
 except Exception as _e:  # noqa: BLE001
     print(f"[calendar-events] 배선 스킵(무시): {type(_e).__name__}: {_e}")
+
+# ---------------- [④캘린더 실적발표] 재생성 배치 (calendar_events 와 동일 패턴) ----------------
+# 위 배당·상장에는 start_scheduler 가 있었는데 실적발표에는 «대응물이 없었다» — 그래서
+# 2026-05-15 스냅샷이 3.5개월 굳은 채로 갔다. 이게 그 대응물이다.
+# 조회 라우트(/api/earnings-calendar)는 기존 그대로 두고 «배치만» 붙인다.
+# GONGSI_EARN_BATCH=0 이면 비활성. 실패해도 앱 전체 무영향.
+try:
+    from features.earnings_calendar.batch import start_scheduler as _earn_batch_start
+    _earn_batch_start()
+except Exception as _e:  # noqa: BLE001
+    print(f"[earn-cal] 배치 배선 스킵(무시): {type(_e).__name__}: {_e}")
 
 api.mount("/", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")

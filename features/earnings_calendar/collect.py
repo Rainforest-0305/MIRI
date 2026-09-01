@@ -88,6 +88,10 @@ def load_all(cache_dir=None):
         files += sorted(glob.glob(os.path.join(cache_dir, pat)))
     records = []
     scanned_rows = 0
+    dup_rows = 0
+    # rcept_no 중복 제거. 창이 겹치게 수집되면(예: 분기 부분파일 + 분기 전체파일) 같은
+    # 접수가 두 번 들어와 lag 표본이 부풀고 median 이 왜곡된다. 접수번호는 DART 전역 유일.
+    seen = set()
     for f in files:
         try:
             with io.open(f, encoding="utf-8") as fh:
@@ -103,6 +107,12 @@ def load_all(cache_dir=None):
             t = report_type(nm)
             if not t:
                 continue
+            rno = r.get("rcept_no", "")
+            if rno:
+                if rno in seen:
+                    dup_rows += 1
+                    continue
+                seen.add(rno)
             fy, fm = parse_period(nm)
             records.append({
                 "rcept_no": r.get("rcept_no", ""),
@@ -118,7 +128,7 @@ def load_all(cache_dir=None):
                 "amend": is_amend(nm),
             })
     return records, {"files": len(files), "scanned_rows": scanned_rows,
-                     "periodic_rows": len(records)}
+                     "periodic_rows": len(records), "dup_dropped": dup_rows}
 
 
 def group_by_corp(records):
