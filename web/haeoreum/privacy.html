@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>해오름 개인정보처리방침</title>
+<style>
+  :root { color-scheme: light; }
+  body {
+    margin: 0 auto; padding: 24px 20px 64px; max-width: 720px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
+                 "Malgun Gothic", Roboto, sans-serif;
+    color: #191F28; background: #FFFFFF; line-height: 1.7; font-size: 16px;
+  }
+  h1 { font-size: 30px; letter-spacing: -0.5px; margin: 0 0 4px; }
+  h2 { font-size: 20px; letter-spacing: -0.3px; margin: 32px 0 8px; }
+  .meta { color: #6B7684; font-size: 14px; margin: 0 0 24px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 15px; }
+  th, td { border: 1px solid #E5E8EB; padding: 10px 12px; text-align: left; vertical-align: top; }
+  th { background: #F7F8FA; font-weight: 700; }
+  ul { padding-left: 20px; }
+  li { margin: 4px 0; }
+  a { color: #1A6FD4; }
+  .note { background: #F7F8FA; border-radius: 12px; padding: 14px 16px; font-size: 15px; }
+</style>
+</head>
+<body>
+
+<h1>해오름 개인정보처리방침</h1>
+<p class="meta">시행일: 2026-08-21 · 최종 개정: 2026-09-04</p>
+
+<p>
+  <strong>리미</strong>(이하 "회사")는 모바일 애플리케이션 <strong>해오름</strong>(이하 "앱")을
+  운영하면서 이용자의 개인정보를 소중히 다룹니다. 이 방침은 앱이 어떤 정보를 이용하고,
+  어디로 보내며, 무엇을 저장하지 않는지를 설명합니다.
+</p>
+
+<div class="note">
+  <strong>먼저 요약합니다.</strong> 해오름은 회원가입이 없고 계정을 만들지 않습니다.
+  이용자를 식별하는 이름·전화번호·이메일을 일절 수집하지 않습니다.
+  위치는 날씨를 계산하는 순간에만 쓰고 <strong>앱에 저장하지 않습니다</strong>.
+  마신 물 잔 수는 <strong>이용자 기기 안에만</strong> 남습니다.
+</div>
+
+<h2>1. 처리하는 정보와 목적</h2>
+<table>
+  <tr><th>항목</th><th>목적</th><th>저장 여부</th></tr>
+  <tr>
+    <td>위치정보(위도·경도)</td>
+    <td>현재 위치의 체감온도 계산, 현재 있는 지역 이름(동 단위) 표시,
+        해의 방향·고도 계산</td>
+    <td><strong>저장하지 않음.</strong> 조회에 사용한 뒤 즉시 버립니다.
+        앱을 닫으면 사라집니다.</td>
+  </tr>
+  <tr>
+    <td>수분 섭취 기록<br>(날짜, 잔 수, 마지막으로 마신 시각)</td>
+    <td>하루 물 섭취 목표 표시 및 리마인더</td>
+    <td>이용자 <strong>기기 내부에만</strong> 저장. 외부로 전송하지 않습니다.</td>
+  </tr>
+  <tr>
+    <td>광고 식별자(Advertising ID) 및 기기·앱 정보</td>
+    <td>앱 내 배너 광고 게재, 광고 성과 측정, 부정 클릭 방지</td>
+    <td>광고 제공사(Google)가 자체 정책에 따라 처리합니다.
+        회사는 이 값을 별도로 저장하지 않습니다.</td>
+  </tr>
+</table>
+
+<h2>2. 위치정보 이용에 관한 안내</h2>
+<ul>
+  <li>위치 권한은 <strong>선택 사항</strong>입니다. 허용하지 않아도 앱의 모든 기능을 쓸 수 있습니다.
+      권한을 허용하지 않으면 서울·인천·수원·대전·대구·부산·울산·광주·강릉·제주 중에서
+      지역을 직접 고르는 방식으로 동작합니다.</li>
+  <li>앱이 <strong>실행 중일 때만</strong> 위치를 확인합니다. 백그라운드 위치를 사용하지 않으며,
+      해당 권한(ACCESS_BACKGROUND_LOCATION)을 선언하지도 않습니다.</li>
+  <li>위치정보는 이동 경로 추적, 프로필 작성, 광고 타기팅에 사용되지 않습니다.</li>
+  <li>권한은 언제든지 <em>기기 설정 &gt; 애플리케이션 &gt; 해오름 &gt; 권한</em>에서 철회할 수 있습니다.
+      철회하면 앱은 자동으로 지역 직접 선택 방식으로 돌아갑니다.</li>
+</ul>
+
+<h2>3. 제3자 전송 및 처리위탁</h2>
+<p>앱은 아래 서비스에 정보를 전송합니다. 각 서비스는 자체 개인정보처리방침을 따릅니다.</p>
+<table>
+  <tr><th>제공처</th><th>전송 항목</th><th>목적</th><th>방침</th></tr>
+  <tr>
+    <td>Open-Meteo</td>
+    <td>위도·경도</td>
+    <td>기상·체감온도 데이터 조회</td>
+    <td><a href="https://open-meteo.com/en/terms" target="_blank" rel="noopener">open-meteo.com/en/terms</a></td>
+  </tr>
+  <tr>
+    <td>기상청<br>(공공데이터포털 data.go.kr)</td>
+    <td>격자 좌표(nx·ny)<br>— 위도·경도를 약 5km 격자 번호로 변환해 보냅니다.
+        정밀 좌표는 전송하지 않습니다.</td>
+    <td>기상청 초단기실황·단기예보 조회(기온·습도·풍속)</td>
+    <td><a href="https://www.data.go.kr/" target="_blank" rel="noopener">data.go.kr</a></td>
+  </tr>
+  <tr>
+    <td>BigDataCloud</td>
+    <td>위도·경도</td>
+    <td>좌표를 지역 이름으로 변환(역지오코딩)</td>
+    <td><a href="https://www.bigdatacloud.com/privacy-and-cookie-policy" target="_blank" rel="noopener">bigdatacloud.com/privacy-and-cookie-policy</a></td>
+  </tr>
+  <tr>
+    <td>Google AdMob</td>
+    <td>광고 식별자, 기기·앱 정보, IP 주소</td>
+    <td>배너 광고 게재 및 측정</td>
+    <td><a href="https://policies.google.com/technologies/partner-sites" target="_blank" rel="noopener">policies.google.com/technologies/partner-sites</a></td>
+  </tr>
+</table>
+<p>
+  각 제공처는 서비스 운영·장애 대응 목적으로 접속 기록(IP 등)을 자체 기준에 따라 일정 기간 보관할 수 있습니다.
+  회사는 이 기록에 접근하지 않습니다.
+</p>
+
+<h2>4. 맞춤 광고와 동의</h2>
+<ul>
+  <li>앱은 Google AdMob 배너 광고를 표시합니다.</li>
+  <li>유럽경제지역(EEA)·영국 등 동의가 필요한 지역의 이용자에게는 앱 실행 시
+      Google의 동의 관리 도구(UMP)를 통해 광고 개인 맞춤 여부를 묻습니다.
+      동의하지 않으면 개인 맞춤이 아닌 광고가 표시됩니다.</li>
+  <li>광고 식별자는 <em>기기 설정 &gt; Google &gt; 광고</em>에서 언제든 재설정하거나 삭제할 수 있습니다.</li>
+</ul>
+
+<h2>5. 보유 및 파기</h2>
+<ul>
+  <li>위치정보: 저장하지 않습니다. 조회 직후 메모리에서 사라집니다.</li>
+  <li>수분 섭취 기록: 기기 안에만 있으며, 날짜가 바뀌면 자동으로 초기화됩니다.
+      앱을 삭제하면 함께 삭제됩니다.</li>
+  <li>회사는 이용자 정보를 담는 자체 서버를 운영하지 않습니다.</li>
+</ul>
+
+<h2>6. 이용자의 권리</h2>
+<ul>
+  <li>위치 권한 철회: 기기 설정에서 언제든 가능합니다.</li>
+  <li>기기 내 저장 데이터 삭제: 앱 삭제 또는 <em>설정 &gt; 애플리케이션 &gt; 해오름 &gt; 저장공간 &gt; 데이터 삭제</em>.</li>
+  <li>광고 식별자 재설정·삭제: 기기 설정에서 가능합니다.</li>
+  <li>회사가 별도로 보관하는 개인정보가 없으므로, 열람·정정·삭제 요청 대상이 되는
+      회사 보관 자료는 존재하지 않습니다.</li>
+</ul>
+
+<h2>7. 만 14세 미만 아동</h2>
+<p>
+  앱은 만 14세 미만 아동을 대상으로 하지 않으며, 아동의 개인정보를 고의로 수집하지 않습니다.
+</p>
+
+<h2>8. 안전성 확보 조치</h2>
+<ul>
+  <li>외부 통신은 전부 HTTPS로 이루어집니다.</li>
+  <li>앱은 이용자 정보를 담는 자체 서버를 두지 않아, 서버 유출 위험 자체가 존재하지 않습니다.</li>
+</ul>
+
+<h2>9. 개정</h2>
+<p>
+  이 방침이 변경되면 앱 또는 이 페이지를 통해 변경 사항과 시행일을 공지합니다.
+</p>
+
+<h2>10. 문의처</h2>
+<p>
+  상호: 리미 (사업자등록번호 532-08-03363)<br>
+  <!-- ★ 사업장 주소는 자택이므로 공개하지 않는다. -->
+  이메일: <strong><a href="mailto:urimk0305@gmail.com">urimk0305@gmail.com</a></strong>
+</p>
+
+</body>
+</html>
