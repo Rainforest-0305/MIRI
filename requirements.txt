@@ -6,6 +6,9 @@ pillow>=10.0
 requests-oauthlib==2.0.0
 pywebpush>=2.0
 finance-datareader>=0.9.90
+# analyst_collect._rows 가 직접 import 한다(한경 표 파싱). 지금은 finance-datareader 의
+# 전이 의존으로만 설치돼 있어, 그쪽이 의존을 빼면 Render 주간 배치가 import 에서 죽는다.
+beautifulsoup4>=4.12
 # 실LLM 3줄요약 승격용(staged, 기본 off). import는 lazy(llm_summary_client 내부
 # 함수에서만). GONGSI_LLM_ENABLED+ANTHROPIC_API_KEY 있을 때만 실제 사용.
 anthropic>=0.40

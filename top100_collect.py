@@ -15,7 +15,7 @@ ETF 제외(President 지시 2026-08-16): 응답의 stockEndType 이 'etf' 인 �
 모든 네트워크/파싱 실패는 격리한다(수집 실패해도 기존 스냅샷 유지, 크래시 없음)."""
 import sys
 import time
-from datetime import date
+from datetime import datetime, timedelta, timezone
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -67,6 +67,19 @@ _PAGES_PER_MARKET = 2
 # 0건일 때 저장을 스킵하므로 기존 스냅샷이 보존된다(fail-safe). 추가로 _fetch_market
 # 이 '행은 있는데 전량 탈락' 상황을 예외로 올려 시장 단위로 격리한다.
 _ALLOWED_END_TYPE = "stock"
+
+# ★updated_at 은 «KST 실행일»이다(2026-10-03 Render Cron 이관).
+#   종전 date.today() 는 «프로세스 로컬 날짜»라 노트북(KST)에선 맞았지만, Render 컨테이너는
+#   UTC 다. 토 06:00 KST = 금 21:00 UTC 라 date.today() 가 «금요일»을 찍는다.
+#   app.py _slot_verdict 는 `updated_at >= 슬롯일(토)` 로 실행 여부를 판정하므로,
+#   UTC 날짜를 쓰면 «정상 실행을 매주 NONRUN 으로 오경보»한다. 그래서 KST 로 고정한다.
+_KST = timezone(timedelta(hours=9))
+
+
+def _today_kst():
+    return datetime.now(_KST).date().isoformat()
+
+
 _TOP100_FILE = config.DATA / "top100.json"
 _TABLE = "market_cap_top100"
 
@@ -202,7 +215,7 @@ def collect():
         print(f"[top100] 경고: ETF 제외 후 {len(merged)}건 < 100 — "
               f"_PAGES_PER_MARKET({_PAGES_PER_MARKET}) 상향 필요", file=sys.stderr)
     top = merged[:100]
-    updated = date.today().isoformat()
+    updated = _today_kst()
     items = []
     for i, it in enumerate(top, start=1):
         items.append({

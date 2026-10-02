@@ -27,7 +27,7 @@ import re
 import signal
 import sys
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -409,7 +409,8 @@ def fetch_reports(code, name, sdate="2025-01-01", edate=None, with_status=False,
       - 0건 + 전 시도 정상이면 REPORTS_ZERO ('부재 후보' — «부재 확정이 아니다»)
     with_status=False(기본)면 종전과 동일하게 리스트만 반환(하위호환)."""
     if edate is None:
-        edate = (date.today() + timedelta(days=1)).isoformat()
+        # KST 기준(Render 컨테이너는 UTC). +1일 여유는 종전과 동일.
+        edate = (datetime.now(_KST).date() + timedelta(days=1)).isoformat()
     names = []
     for n in [name] + list(alt_names or []):
         n = (n or "").strip()
@@ -738,7 +739,10 @@ def build_payload(code, name, prev_loader=None, alt_names=None):
         "avg_tp_by_broker": bstat["avg_tp_by_broker"],
         "top_broker_share": bstat["top_broker_share"],
         "window_start": window_start,
-        "updated_at": date.today().isoformat(),
+        # ★KST 실행일(2026-10-03 Render Cron 이관). 컨테이너는 UTC 라 date.today() 를 쓰면
+        #   토 06:00 KST(=금 21:00 UTC) 실행분이 «금요일»로 찍혀 app.py 슬롯 감시가
+        #   매주 NONRUN 오경보를 낸다(top100_collect._today_kst 와 같은 사유).
+        "updated_at": datetime.now(_KST).date().isoformat(),
         "prices": prices,
         "reports": tp_reps,
         "disclaimer": _DISCLAIMER,
