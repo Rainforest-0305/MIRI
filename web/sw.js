@@ -1,7 +1,8 @@
 /* 미리(MIRI) service worker — 앱셸 캐시 + 오프라인 폴백.
    전략: 정적 자산은 cache-first, API(/api/*)는 network-only(항상 실시간 공시).
    설치 가능 요건(manifest + fetch 핸들러 + HTTPS/localhost)을 충족한다. */
-const CACHE = 'miri-v50';   // v49→v50: 증권사 리포트 날짜 한 줄(26.07.31·tabular-nums) + 알람 토글 토큰 복구(2026-08-29).
+const CACHE = 'miri-v51';   // v50→v51: 토스쇼핑 상품 카드(인피드) — 메인 공시 카드 3·10·17번째 뒤 · 랭킹 3·13·23행 뒤(2026-10-04). 새 셸 자산 /app/shop.js(SHELL precache·cache-first) — 데이터를 바꾸면 bump 필수.
+// (v50)   // v49→v50: 증권사 리포트 날짜 한 줄(26.07.31·tabular-nums) + 알람 토글 토큰 복구(2026-08-29).
 // (v48)   // v47→v48: President 지시(2026-08-16) — 「레포트별로 나타나게 해줘」.
                             //   애널리스트 컨센서스를 «평균 하나»가 아니라 «어느 증권사가 언제 얼마를 냈는지»로 표시.
                             //   ①증권사 리포트 목록을 상시 노출(구동작: '자세히 보기' 뒤에 접혀 있어 아무도 못 봤다).
@@ -116,7 +117,7 @@ const SPLASH = [
   '/splash/splash-1206x2622.png', '/splash/splash-1242x2688.png', '/splash/splash-1284x2778.png',
   '/splash/splash-1290x2796.png', '/splash/splash-1320x2868.png'
 ];
-const SHELL = ['/', '/index.html', '/manifest.json', '/app/shell.js',
+const SHELL = ['/', '/index.html', '/manifest.json', '/app/shell.js', '/app/shop.js',
   '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-maskable-192.png', '/icon-maskable-512.png',
   '/apple-touch-icon.png'].concat(SPLASH);
 

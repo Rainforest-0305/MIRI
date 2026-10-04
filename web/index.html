@@ -1307,6 +1307,62 @@ window.MIRI_AD_CONFIG = {
   .rk-sub{display:block;font-size:11.5px;color:var(--t3);font-weight:600;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .rk-val{font-size:14px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums;flex:none}
   .rk-val.up{color:var(--up)} .rk-val.down{color:var(--down)} .rk-val.flat{color:var(--t3)}
+  /* ===== 토스쇼핑 상품 카드(인피드) — 2026-10-04 · 렌더는 app/shop.js =====
+     ★메인 피드 = 공시 카드(.card) 해부 그대로: 머리줄(.top) · 제목(.ttl) · 본문 상자(.impact) · 버튼(.scaletog) · 발(.foot).
+       같은 토큰(--card·--radius·--card-2·--blue-soft)만 쓴다 → 피드의 한 장으로 읽힌다. 다크/라이트는 토큰이 따라간다.
+     ★class 에 'card' 를 쓰지 않는다 — AdFit 인피드 엔진(countCards)이 .card 만 세서 광고 자리가 밀리지 않게.
+     ★카드 전체가 하나의 링크(<a target=_blank rel="noopener sponsored">). 안에 다른 버튼을 두지 않는다.
+     ★할인율·가격은 --t1 굵게 — 등락색(--up/--down)을 쓰지 않는다(공시 수치와 섞여 보이지 않게).
+     ★사진 상자는 크기 고정(56/52) — 로드 전후·실패(.is-icon) 모두 같은 크기 → 레이아웃 이동 0.
+     ★대가성 문구 = 카드 맨 아래 작게(11px · --t2). 「광고」 꼬리표는 머리줄에.
+     ⛔가격 옆 날짜 «기준» 문구 금지(모든 앱 공통). */
+  .shopcard{display:block;background:var(--card);border-radius:var(--radius);padding:16px 16px 13px;
+    color:var(--t1);text-decoration:none;word-break:keep-all;overflow-wrap:anywhere;animation:rs .34s cubic-bezier(.22,1,.36,1) both;
+    -webkit-touch-callout:none;transition:transform .08s ease}
+  .shopcard:active,.shoprank:active{transform:scale(.99)}
+  .shopcard:focus-visible,.shoprank:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+  .sc-top{display:flex;align-items:center;gap:7px;margin-bottom:9px;min-width:0}
+  .sc-tic{width:15px;height:15px;flex:none;color:var(--t3)}
+  .sc-lb{font-weight:800;font-size:15.5px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sc-top .mk{flex:none}
+  .sc-tags{margin-left:auto;display:flex;gap:4px;flex:none}
+  .sc-pill{font-size:10.5px;font-weight:800;line-height:1.35;border-radius:6px;padding:1px 6px;background:var(--slate-soft);color:var(--t2);white-space:nowrap}
+  .sc-pill.deal{background:var(--warn-soft);color:var(--t1)}
+  .sc-ttl{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+    font-weight:700;font-size:16px;line-height:1.4;margin:0 0 10px;text-wrap:balance}
+  .sc-body{display:flex;align-items:center;gap:11px;background:var(--card-2);border-radius:16px;padding:10px 11px}
+  .sc-th,.sr-th{position:relative;flex:none;width:56px;height:56px;border-radius:12px;overflow:hidden;background:var(--line);display:grid;place-items:center}
+  .sr-th{width:52px;height:52px}
+  .sc-th img,.sr-th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  .sc-th .sc-ic,.sr-th .sc-ic{display:none;width:22px;height:22px;color:var(--blue)}
+  .sc-th.is-icon,.sr-th.is-icon{background:var(--blue-soft)}
+  .sc-th.is-icon img,.sr-th.is-icon img{display:none}
+  .sc-th.is-icon .sc-ic,.sr-th.is-icon .sc-ic{display:block}
+  .sc-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .sc-nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13.5px;line-height:1.45;color:var(--t2)}
+  .sc-price{font-size:15px;font-weight:800;color:var(--t1);font-variant-numeric:tabular-nums}
+  .sc-price s{font-size:12px;font-weight:600;color:var(--t3);margin-left:2px}
+  .sc-meta{font-size:11.5px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sc-cta{margin-top:8px;min-height:44px;display:flex;align-items:center;justify-content:center;gap:4px;
+    background:var(--blue-soft);color:var(--blue-ink);border-radius:11px;font-size:13.5px;font-weight:800}
+  .sc-chev{width:14px;height:14px;flex:none}
+  .sc-disc{display:block;margin-top:8px;padding-top:7px;border-top:1px solid var(--line-2);
+    font-size:11px;line-height:1.5;color:var(--t2);font-weight:500}
+  @media (hover:hover){.shopcard:hover .sc-cta,.shoprank:hover .sr-go{filter:brightness(.97)}}
+  /* 랭킹: 순위 카드(.rank)를 끊고 그 «사이»에 둔다(순위 행으로 오인되지 않게) — 간격 = 섹션 단계 --sp-5 */
+  .rkstack{display:flex;flex-direction:column;gap:var(--sp-5)}
+  .shoprank{display:block;background:var(--card);border-radius:var(--radius);padding:6px 4px 10px;
+    box-shadow:0 0 0 1px var(--line) inset;color:var(--t1);text-decoration:none;word-break:keep-all;-webkit-touch-callout:none;transition:transform .08s ease}
+  .sr-row{display:flex;align-items:center;gap:11px;padding:11px 12px}
+  .sr-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .sr-nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:14px;font-weight:800;letter-spacing:-.02em;line-height:1.35}
+  .sr-price{font-size:13.5px;font-weight:800;font-variant-numeric:tabular-nums}
+  .sr-price i{font-style:normal;font-size:11.5px;font-weight:600;color:var(--t2);margin-left:6px}
+  .sr-sub{display:flex;align-items:center;gap:5px;min-width:0}
+  .sr-lb{font-size:11.5px;color:var(--t2);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .sr-go{flex:none;min-height:32px;display:flex;align-items:center;gap:2px;padding:0 10px;border-radius:11px;
+    background:var(--blue-soft);color:var(--blue-ink);font-size:13px;font-weight:800}
+  .shoprank .sc-disc{margin:0 12px;padding-top:0;border-top:none}
   .rk-go{font-size:18px;line-height:1;color:var(--t4);font-weight:700;flex:none}   /* 항목8: 관심종목 행 진입 화살표 */
   /* 캘린더 세그 (준비중 pill) */
   .cal-tabs{display:flex;gap:6px;padding:2px 2px 6px}
@@ -3603,6 +3659,8 @@ if(CLAIM_APPLIED){setTimeout(()=>{try{showToast('이 기기를 기존 관심목�
 })();
 </script>
 <!-- 5탭 셸 라우터: 인라인 스크립트 전역(STATE·renderFeed·loadMezz·cardHTML 등)과 같은 스코프 공유(classic script, 모듈 아님). 인라인 스크립트 뒤에 로드. -->
+<!-- 2026-10-04 토스쇼핑 상품 카드(인피드): window.MIRI_SHOP — shell.js 가 있으면 쓴다(없으면 종전 렌더). shell.js «앞»에서 로드. -->
+<script src="/app/shop.js"></script>
 <script src="/app/shell.js"></script>
 
 <!-- ============================================================================

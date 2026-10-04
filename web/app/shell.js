@@ -160,9 +160,13 @@
   }
   /* 항목53: 밤사이 공시 '더보기' 청크 — 초기 OV_CHUNK 건만 DOM 렌더, 버튼 클릭 시 추가(122건 전량 렌더 방지). */
   var OV_CHUNK=24, _ovItems=[], _ovShown=0;
+  /* 2026-10-04 토스쇼핑 상품 카드(app/shop.js): 공시 카드 «사이»에 끼운다. 자리 규칙은 shop.js 한 곳.
+     _shopBase = 밤사이 구간 앞에 놓인 큐레이션 카드 수(전역 순번을 이어 세기 위해). MIRI_SHOP 이 없으면(구캐시) 종전 그대로. */
+  var _shopBase=0;
+  function _shopWeave(cards,base,tail){ return (window.MIRI_SHOP&&MIRI_SHOP.weaveFeed)?MIRI_SHOP.weaveFeed(cards,base,!!tail):cards.join(''); }
   function _renderOvChunk(){
     if(!_ovItems.length)return '<div class="empty" style="padding:18px 10px">밤사이 신규 공시가 없습니다.</div>';
-    var html=_ovItems.slice(0,_ovShown).map(function(a){return cardHTML(a,'');}).join('');
+    var html=_shopWeave(_ovItems.slice(0,_ovShown).map(function(a){return cardHTML(a,'');}),_shopBase);
     var rem=_ovItems.length-_ovShown;
     if(rem>0)html+='<button type="button" class="morebtn" id="ovMore" data-ovmore="1" aria-label="밤사이 공시 더보기">더보기 <span class="num">'+rem+'</span>건</button>';
     return html;
@@ -196,8 +200,10 @@
             '<span class="brief-cta" aria-hidden="true" style="flex:none;color:var(--blue);font-weight:700;font-size:12.5px">자세히 ›</span></div>'+
             '<div class="bl">'+esc(d.market_scope||'코스피·코스닥')+' · 기준 '+esc(_fmtYmd(d.dataset_as_of||d.generated_at||''))+'</div></button>';
       body+='<div class="sec-h"><span class="st">오늘의 큐레이션</span><span class="ss">MIRI 선별</span></div>';
+      _shopBase=0;
       if(cur.length&&curStatus!=='pending_contract'){
-        body+=markWatched(cur).map(function(a){return cardHTML(a,'');}).join('');
+        body+=_shopWeave(markWatched(cur).map(function(a){return cardHTML(a,'');}),0,true);   // true = 구간 끝(다음이 섹션 제목) 허용
+        _shopBase=cur.length;   // 밤사이 구간은 이 다음 순번부터 센다
       }else{
         body+='<div class="empty" style="padding:22px 10px">큐레이션 준비중 — 곧 오늘의 핵심 공시를 선별해 보여드립니다.</div>';
       }
@@ -216,7 +222,7 @@
       var recent=(typeof STATE!=='undefined'?(STATE.items||[]):[]).slice(0,12);
       brief+='<div class="brief hero-am"><div class="bl"><b>오늘 브리핑 준비중</b> — 최근 공시로 대체 표시 중</div></div>';
       body+='<div class="sec-h"><span class="st">최근 공시</span><span class="ss">'+recent.length+'건</span></div>';
-      body+= recent.length ? recent.map(function(a){return cardHTML(a,'');}).join('')
+      body+= recent.length ? _shopWeave(recent.map(function(a){return cardHTML(a,'');}),0)
                            : '<div class="empty" style="padding:30px 10px">표시할 공시가 없습니다. 잠시 후 다시 시도해 주세요.</div>';
       // _todayLoaded 유지 false → 엔드포인트 가동 시 다음 진입/폴에서 수렴
     }
@@ -346,7 +352,8 @@
     var cap=document.getElementById('rankCap'); if(cap)cap.textContent='시가총액 상위 100 종목';
     if(!_top100Loaded&&!TOP100_DATA.length){ host.innerHTML='<div class="empty" style="padding:30px 10px">시총 상위 종목 불러오는 중…</div>'; loadTop100(); return; }
     if(!TOP100_DATA.length){ host.innerHTML='<div class="empty" style="padding:30px 10px">시총 데이터 준비중입니다.</div>'; return; }
-    host.innerHTML='<div class="rank">'+TOP100_DATA.map(top100RowHTML).join('')+'</div>';
+    /* 2026-10-04: 순위 카드 «밖» 3·13·23 행 뒤에 토스쇼핑 상품 카드(app/shop.js). 없으면 종전 마크업 그대로 */
+    host.innerHTML=(window.MIRI_SHOP&&MIRI_SHOP.rankHTML)?MIRI_SHOP.rankHTML(TOP100_DATA.map(top100RowHTML)):('<div class="rank">'+TOP100_DATA.map(top100RowHTML).join('')+'</div>');
   }
   function renderRanking(){
     var host=document.getElementById('rankBody'); if(!host)return;
@@ -368,7 +375,7 @@
       host.innerHTML='<div class="empty" style="padding:30px 10px">랭킹 집계 준비중 — 공시 반응 랭킹이 곧 제공됩니다.</div>';
       return;
     }
-    host.innerHTML=moveBanner+'<div class="rank">'+items.map(rankRowHTML).join('')+'</div>';
+    host.innerHTML=moveBanner+((window.MIRI_SHOP&&MIRI_SHOP.rankHTML)?MIRI_SHOP.rankHTML(items.map(rankRowHTML)):('<div class="rank">'+items.map(rankRowHTML).join('')+'</div>'));
   }
 
   /* ---------- ④ 캘린더 (메자닌 lazy-load, #mezzBody 승격) ---------- */
