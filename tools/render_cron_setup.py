@@ -64,9 +64,15 @@ BUILD_PATHS = ["top100_collect.py", "analyst_collect.py", "config.py", "miri_cac
 def _key():
     k = os.getenv("RENDER_API_KEY", "").strip()
     if not k:
+        # 레포 .env → (worktree 에서 실행할 때) 형제 폴더 gongsi-alert/.env 순.
+        # worktree 에는 .env 가 없다(.gitignore) — 값을 복사해 두지 않으려고 원본을 읽는다.
         try:
             from dotenv import dotenv_values
-            k = (dotenv_values(ROOT / ".env") or {}).get("RENDER_API_KEY", "") or ""
+            for p in (ROOT / ".env", ROOT.parent / "gongsi-alert" / ".env"):
+                if p.exists():
+                    k = (dotenv_values(p) or {}).get("RENDER_API_KEY", "") or ""
+                    if k:
+                        break
         except Exception:  # noqa: BLE001
             k = ""
     if not k:
