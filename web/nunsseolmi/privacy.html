@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>눈썰미 개인정보처리방침</title>
+<style>
+:root{--board:#E9EAE7;--surface:#FCFCFB;--ink:#141518;--ink2:#3D4045;--ink3:#5F6268;--line:#DCDDD9;--marker:#141518;--onmarker:#FCFCFB;--up:#BF1520}
+@media (prefers-color-scheme:dark){:root{--board:#0B0C0E;--surface:#17191E;--ink:#EDEEEB;--ink2:#C4C6C2;--ink3:#94979C;--line:#2C2E32;--marker:#EDEEEB;--onmarker:#121316;--up:#FF6167}}
+*{box-sizing:border-box}body{margin:0;background:var(--board);color:var(--ink);font:17px/1.65 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Pretendard","Noto Sans KR",sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:680px;margin:0 auto;padding:40px 16px 64px}.page{background:var(--surface);border-radius:3px;padding:28px 22px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
+.word{display:inline-block;font-size:30px;font-weight:900;letter-spacing:-.04em;padding-bottom:7px;background:linear-gradient(var(--ink),var(--ink)) bottom/100% 1.5px no-repeat,repeating-linear-gradient(90deg,var(--ink) 0 1.3px,transparent 1.3px 9px) bottom/100% 6px no-repeat}.mark{background:var(--marker);color:var(--onmarker);padding:0 6px;border-radius:2px}
+h1{font-size:26px;line-height:1.3;margin:6px 0}h2{font-size:19px;margin:30px 0 8px}p,li{color:var(--ink2)}ul{padding-left:20px}
+table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;border-top:1px dashed var(--ink3);padding:10px 6px;vertical-align:top}th{width:32%;color:var(--ink)}
+.muted{color:var(--ink3);font-size:14px}a{color:var(--ink);text-underline-offset:3px}::selection{background:var(--ink);color:var(--surface)}
+.contact{display:block;margin-top:14px;background:var(--marker);color:var(--onmarker);text-decoration:none;text-align:center;font-weight:800;padding:14px;border-radius:8px}
+</style>
+</head>
+<body>
+<main>
+<div class="page">
+<div class="word">눈썰미</div>
+<h1>개인정보처리방침</h1>
+<p class="muted">시행일: 2026년 11월 10일 · 운영: 리미(대표 권우림)</p>
+<p>눈썰미(이하 「앱」)는 가입 없이 쓰는 앱이에요. 이름·전화번호·이메일·위치를 받지 않아요. 아래는 앱이 실제로 다루는 정보 전부예요.</p>
+<h2>1. 서버에 저장하는 정보</h2>
+<table>
+<tr><th>견적 내용</th><td>분류(인테리어·이사·차 수리), 시·군·구, 규모(평수·톤수·차급), 항목 분류·수량·금액, 합계, 올린 시각</td></tr>
+<tr><th>업체 이름</th><td>원문을 저장하지 않고, 같은 업체 견적을 구별하기 위한 «되돌릴 수 없는 값(해시)»만 저장해요. 누구에게도 보이지 않아요.</td></tr>
+<tr><th>기기 토큰</th><td>앱이 처음 켜질 때 만드는 무작위 값이에요. 내 견적과 열람 기간을 묶는 데만 써요. 서버에는 해시로 저장해요.</td></tr>
+<tr><th>판정·신고</th><td>어떤 견적에 어떤 판정·신고를 했는지(기기 토큰 기준)</td></tr>
+<tr><th>열람권 구매 확인</th><td>App Store 가 서명한 거래 정보(상품·구매 시각·거래 번호)로 열람 기간을 확인해요. 카드 번호 등 결제 정보는 받지 않아요.</td></tr>
+</table>
+<h2>2. 견적서 사진</h2>
+<p>사진은 항목과 금액을 읽기 위해서만 앱 서버와 판독 AI(Anthropic, 미국)로 보내져요. 앱 서버는 사진을 저장하지 않고, 판독이 끝나면 버려요. Anthropic 은 자사 정책에 따라 처리 기록을 일정 기간 보관할 수 있어요(<a href="https://www.anthropic.com/legal/privacy">Anthropic 개인정보 처리방침</a>). 사진에 개인정보(이름·연락처·주소)가 보이지 않게 가리고 찍는 것을 권해요.</p>
+<h2>3. 다른 사람에게 보이는 것</h2>
+<p>다른 사용자에게는 시·군·구, 규모, 항목 분류·금액, 합계, 판정 수만 보여요. 업체 이름, 사진, 견적서에 적힌 글자, 기기 토큰은 보이지 않아요.</p>
+<h2>4. 보관 기간과 지우기</h2>
+<ul><li>견적은 «내 견적» 탭에서 언제든 지울 수 있고, 지우면 서버에서도 지워져요.</li><li>앱을 지우면 기기 토큰이 사라져 이후로는 그 견적을 지울 수 없게 되니, 지우고 싶은 견적은 앱을 지우기 전에 지워 주세요. 메일로 요청하면 도와드려요.</li><li>신고가 쌓인 견적은 숨겨져요.</li></ul>
+<h2>5. 국외 이전</h2>
+<p>견적서 사진 판독을 위해 사진이 Anthropic(미국)의 서버로 전송돼요. 서버는 해외 클라우드(Render)에 있을 수 있어요.</p>
+<h2>6. 권한</h2>
+<p>카메라(견적서를 찍을 때만). 위치·연락처·추적·광고 식별자는 쓰지 않아요.</p>
+<h2>7. 문의</h2>
+<p>개인정보 문의: <a href="mailto:urimk0305@gmail.com">urimk0305@gmail.com</a> · 개인정보 보호 책임자: 권우림(리미)</p>
+</div>
+</main>
+</body>
+</html>
