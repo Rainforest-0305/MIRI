@@ -1,7 +1,8 @@
 /* 미리(MIRI) service worker — 앱셸 캐시 + 오프라인 폴백.
    전략: 정적 자산은 cache-first, API(/api/*)는 network-only(항상 실시간 공시).
    설치 가능 요건(manifest + fetch 핸들러 + HTTPS/localhost)을 충족한다. */
-const CACHE = 'miri-v51';   // v50→v51: 토스쇼핑 상품 카드(인피드) — 메인 공시 카드 3·10·17번째 뒤 · 랭킹 3·13·23행 뒤(2026-10-04). 새 셸 자산 /app/shop.js(SHELL precache·cache-first) — 데이터를 바꾸면 bump 필수.
+const CACHE = 'miri-v52';   // v51→v52: 개인정보처리방침·고객지원(루트·앱별) — iOS 앱 AdMob 광고 문단·「부적절한 광고 신고」 절(2026-11-26). 정적 페이지가 cache-first 로 남아 있을 수 있어 bump.
+// (이전) const CACHE = 'miri-v51';   // v50→v51: 토스쇼핑 상품 카드(인피드) — 메인 공시 카드 3·10·17번째 뒤 · 랭킹 3·13·23행 뒤(2026-10-04). 새 셸 자산 /app/shop.js(SHELL precache·cache-first) — 데이터를 바꾸면 bump 필수.
 // (v50)   // v49→v50: 증권사 리포트 날짜 한 줄(26.07.31·tabular-nums) + 알람 토글 토큰 복구(2026-08-29).
 // (v48)   // v47→v48: President 지시(2026-08-16) — 「레포트별로 나타나게 해줘」.
                             //   애널리스트 컨센서스를 «평균 하나»가 아니라 «어느 증권사가 언제 얼마를 냈는지»로 표시.
